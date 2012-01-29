@@ -96,6 +96,12 @@ ret
         (t
          (error "unsupported"))))
 
+(defun @sub (arg)
+  (cond ((r/r-p arg)
+         `(#x2b ,(mk-r/r-modrm (second arg) (first arg))))
+        (t
+         (error "unsupported"))))
+
 (defun @ret (arg)
   (declare (ignore arg))
   #xC3)
@@ -110,6 +116,7 @@ ret
       (:pop (@pop (cdr mnemonic)))
       (:mov (@mov (cdr mnemonic)))
       (:add (@add (cdr mnemonic)))
+      (:sub (@sub (cdr mnemonic)))
       (:ret (@ret (cdr mnemonic))))
     INTO list
     FINALLY

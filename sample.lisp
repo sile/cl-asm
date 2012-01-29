@@ -56,6 +56,11 @@
  
  20 12)
 
+;; TODO: cmp, call, jump-if, data-stack-op
+;; rdiにdata-stackの先頭を入れておく
+
+(extern-alien "malloc" (function (* t) int))
+
 (cl-asm:assemble '((:mov (%rbp -4) %eax)))
 
 0010 01D0     		addl	%edx, %eax
