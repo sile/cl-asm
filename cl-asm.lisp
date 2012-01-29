@@ -89,7 +89,12 @@ ret
            `(#x8B ,(mk-m/r-modrm (caar arg) (second arg)) ,displacement)))
         (t
          (error "unsupported"))))
-  
+
+(defun @add (arg)
+  (cond ((r/r-p arg)
+         `(#x01 ,(mk-r/r-modrm (first arg) (second arg))))
+        (t
+         (error "unsupported"))))
 
 (defun @ret (arg)
   (declare (ignore arg))
@@ -104,6 +109,7 @@ ret
       (:push (@push (cdr mnemonic)))
       (:pop (@pop (cdr mnemonic)))
       (:mov (@mov (cdr mnemonic)))
+      (:add (@add (cdr mnemonic)))
       (:ret (@ret (cdr mnemonic))))
     INTO list
     FINALLY

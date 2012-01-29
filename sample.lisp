@@ -42,7 +42,9 @@
    (:push %rsi)
    (:push %rbx)
 
-   (:mov (%rbp -8) %eax)
+   (:mov (%rbp -08) %eax)
+   (:mov (%rbp -16) %edx)
+   (:add %edx %eax)
 
    (:pop %rbx)
    (:pop %rsi)
@@ -50,8 +52,10 @@
    (:pop %rbp)
    :ret)
 
- (function int int)
+ (function int int int)
  
- 20)
+ 20 12)
 
 (cl-asm:assemble '((:mov (%rbp -4) %eax)))
+
+0010 01D0     		addl	%edx, %eax
