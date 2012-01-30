@@ -40,9 +40,10 @@ ret
     ((%edi %rdi) 7)))
 
 (defun @push (arg)
-  (if (= (length arg) 1)
-      (+ #x50 (get-rd (car arg)))
-    (error "unsupported")))
+  (assert (= 1 (length arg)))
+  (etypecase #1=(car arg)
+    (symbol (+ #x50 (get-rd #1#)))
+    (integer `(#x68 ,@(int32-to-bytes #1#)))))
 
 (defun @pop (arg)
   (if (= (length arg) 1)
@@ -72,7 +73,6 @@ ret
        (reg-p (first arg)) 
        (reg-p (second arg))))
 
-
 (defun m/r-p (arg)
   (and (= (length arg) 2)
        (consp (first arg))
@@ -93,9 +93,7 @@ ret
          (let* ((displacement (to-ubyte (second (first arg)))))
            `(#x8B ,(mk-m/r-modrm (caar arg) (second arg)) ,displacement)))
         ((i/r-p arg) ; ex: (:mov 10 %eax)
-         (if (string= '%eax (second arg))
-             `(#xB8 ,@(int32-to-bytes (first arg)))
-           (error "unsupported")))
+         `(,(+ #xB8 (get-rd (second arg))) ,@(int32-to-bytes (first arg))))
         (t
          (error "unsupported"))))
 
@@ -151,6 +149,25 @@ ret
 
 (defun to-list (x) (if (listp x) x (list x)))
 
+#+SBCL
+(defun extern-fn-ptr (name)
+  (let ((fn (eval `(sb-alien:extern-alien ,name (function sb-alien:int)))))
+    (sb-sys:sap-int (sb-alien:alien-sap fn))))
+
+(defun @call (arg)
+  (assert (= 1 (length arg)))
+  (typecase #1=(first arg)
+    (integer `(,#xE8 ,@(int32-to-bytes #1#)))
+    (cons
+     (destructuring-bind (tag name) #1#
+       (assert (eq tag :extern))
+       (let ((ptr (extern-fn-ptr name)))
+         (append (@mov `(,ptr %eax)) ; TODO: 64bit mov
+                 `(#xFF ,#b11010000))))))) ; /2 = 010
+
+(defun @call-unresolve ()
+  `(,#xE8 0 0 0 0))
+
 (defun assemble (mnemonics)
   (loop WITH labels = '()
         WITH unresolves = '()
@@ -168,6 +185,10 @@ ret
          (:add (@add (cdr mnemonic)))
          (:sub (@sub (cdr mnemonic)))
          (:cmp (@cmp (cdr mnemonic)))
+         (:call (if (symbolp (second mnemonic))
+                    (progn (push (list (second mnemonic) (1+ (length list)) 4) unresolves)
+                           (@call-unresolve))
+                  (@call (cdr mnemonic))))
          (:jmp (if (symbolp (second mnemonic))
                    (progn (push (list (second mnemonic) (1+ (length list)) 4) unresolves)
                           (@jmp-unresolve))
