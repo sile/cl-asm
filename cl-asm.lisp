@@ -102,24 +102,58 @@ ret
         (t
          (error "unsupported"))))
 
+(defun @cmp (arg)
+  (cond ((r/r-p arg)
+         `(#x39 ,(mk-r/r-modrm (second arg) (first arg))))
+        (t
+         (error "unsupported"))))
+
 (defun @ret (arg)
   (declare (ignore arg))
   #xC3)
 
+(defun int32-to-bytes (n)
+  (loop FOR i FROM 0 BELOW 4
+        COLLECT (ldb (byte 8 (* 8 i)) n)))
+
+(defun @jmp-unresolve ()
+  `(#xE9 0 0 0 0))
+
+(defun @jmp (arg)
+  (assert (and (= (length arg) 1)
+               (integerp (first arg))))
+  `(#xE9 ,@(int32-to-bytes (first arg)))) ; relative 32bit jump
+
 (defun to-list (x) (if (listp x) x (list x)))
 
 (defun assemble (mnemonics)
-  (loop FOR mnemonic IN (mapcar #'to-list mnemonics)
-    COLLECT
-    (ecase (car mnemonic)
-      (:push (@push (cdr mnemonic)))
-      (:pop (@pop (cdr mnemonic)))
-      (:mov (@mov (cdr mnemonic)))
-      (:add (@add (cdr mnemonic)))
-      (:sub (@sub (cdr mnemonic)))
-      (:ret (@ret (cdr mnemonic))))
+  (loop WITH labels = '()
+        WITH unresolves = '()
+        FOR mnemonic IN (mapcar #'to-list mnemonics)
+    APPEND
+    (if (not (keywordp (car mnemonic)))
+        ;; label
+        (progn (push (cons (car mnemonic) (length list)) labels)
+               '())
+      (to-list
+       (ecase (car mnemonic)
+         (:push (@push (cdr mnemonic)))
+         (:pop (@pop (cdr mnemonic)))
+         (:mov (@mov (cdr mnemonic)))
+         (:add (@add (cdr mnemonic)))
+         (:sub (@sub (cdr mnemonic)))
+         (:cmp (@cmp (cdr mnemonic)))
+         (:jmp (if (symbolp (second mnemonic))
+                   (progn (push (cons (second mnemonic) (1+ (length list))) unresolves)
+                          (@jmp-unresolve))
+                 (@jmp (cdr mnemonic))))
+         (:ret (@ret (cdr mnemonic))))))
     INTO list
     FINALLY
+    (loop FOR (sym . offset) IN unresolves
+          FOR pos = (- (cdr (assoc sym labels)) (+ 4 offset)) ; relative
+          DO
+          (setf (subseq list offset (+ offset 4)) (int32-to-bytes pos)))
     (return (flatten list))))
 
 #+SBCL
