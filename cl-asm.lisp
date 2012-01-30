@@ -78,6 +78,11 @@ ret
        (consp (first arg))
        (reg-p (second arg))))
 
+(defun i/r-p (arg)
+  (and (= (length arg) 2)
+       (integerp (first arg))
+       (reg-p (second arg))))
+
 (defun to-ubyte (n)
   (ldb (byte 8 0) n))
 
@@ -87,6 +92,10 @@ ret
         ((m/r-p arg) ; ex: (:mov (%rbp -4) %eax)
          (let* ((displacement (to-ubyte (second (first arg)))))
            `(#x8B ,(mk-m/r-modrm (caar arg) (second arg)) ,displacement)))
+        ((i/r-p arg) ; ex: (:mov 10 %eax)
+         (if (string= '%eax (second arg))
+             `(#xB8 ,@(int32-to-bytes (first arg)))
+           (error "unsupported")))
         (t
          (error "unsupported"))))
 
@@ -98,13 +107,13 @@ ret
 
 (defun @sub (arg)
   (cond ((r/r-p arg)
-         `(#x2b ,(mk-r/r-modrm (second arg) (first arg))))
+         `(#x29 ,(mk-r/r-modrm (first arg) (second arg))))
         (t
          (error "unsupported"))))
 
 (defun @cmp (arg)
   (cond ((r/r-p arg)
-         `(#x39 ,(mk-r/r-modrm (second arg) (first arg))))
+         `(#x39 ,(mk-r/r-modrm (first arg) (second arg))))
         (t
          (error "unsupported"))))
 
@@ -123,6 +132,22 @@ ret
   (assert (and (= (length arg) 1)
                (integerp (first arg))))
   `(#xE9 ,@(int32-to-bytes (first arg)))) ; relative 32bit jump
+
+(defun jmp-cond (cond)
+  (ecase cond
+    (:<  #x77)
+    (:<= #x73)
+    (:>  #x72)
+    (:>= #x76)
+    (:=  #x74)
+    (:/= #x75)
+    ))
+
+(defun @jmp-if-unresolve (arg)
+  `(,(jmp-cond (first arg)) 0)) ; relative 8bit jump
+
+(defun @jmp-if (arg)
+  `(,(jmp-cond (first arg)) ,(second arg)))
 
 (defun to-list (x) (if (listp x) x (list x)))
 
@@ -144,16 +169,23 @@ ret
          (:sub (@sub (cdr mnemonic)))
          (:cmp (@cmp (cdr mnemonic)))
          (:jmp (if (symbolp (second mnemonic))
-                   (progn (push (cons (second mnemonic) (1+ (length list))) unresolves)
+                   (progn (push (list (second mnemonic) (1+ (length list)) 4) unresolves)
                           (@jmp-unresolve))
                  (@jmp (cdr mnemonic))))
+         (:jmp-if (if (symbolp (third mnemonic))
+                      (progn (push (list (third mnemonic) (1+ (length list)) 1) unresolves)
+                             (@jmp-if-unresolve (cdr mnemonic)))
+                    (@jmp-if (cdr mnemonic))))
          (:ret (@ret (cdr mnemonic))))))
     INTO list
     FINALLY
-    (loop FOR (sym . offset) IN unresolves
-          FOR pos = (- (cdr (assoc sym labels)) (+ 4 offset)) ; relative
+    (loop FOR (sym offset len) IN unresolves
+          FOR pos = (- (cdr (assoc sym labels)) (+ len offset)) ; relative
           DO
-          (setf (subseq list offset (+ offset 4)) (int32-to-bytes pos)))
+          (ecase len
+            (4 (setf (subseq list offset (+ offset 4)) (int32-to-bytes pos)))
+            (1 (setf (nth offset list) pos))))
+             
     (return (flatten list))))
 
 #+SBCL

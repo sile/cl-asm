@@ -66,11 +66,15 @@
 
    (:mov (%rbp -08) %eax)
    (:mov (%rbp -16) %edx)
-   (:jmp add)
+   (:cmp %eax %edx)
+   (:jmp-if :< then)
    
-   (:sub %edx %eax)
-   add
-   (:add %edx %eax)
+   else
+   (:mov 1 %eax)
+   (:jmp end)
+   then
+   (:mov 2 %eax)
+   end
    
    (:pop %rbx)
    (:pop %rsi)
@@ -80,13 +84,12 @@
 
  (function int int int)
  
- 20 12)
+ 20 21)
 
-;; TODO: cmp, call, jump-if, data-stack-op
+;; TODO: call, data-stack-op
 ;; rdiにdata-stackの先頭を入れておく
 
 (extern-alien "malloc" (function (* t) int))
 
-(cl-asm:assemble '((:jmp end) (:add %edx %eax) end))
+(cl-asm:assemble '((:jmp-if :< end) (:add %edx %eax) end))
 
-0010 01D0     		addl	%edx, %eax
