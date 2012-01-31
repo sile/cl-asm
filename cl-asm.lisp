@@ -39,6 +39,17 @@ ret
     ((%esi %rsi) 6)
     ((%edi %rdi) 7)))
 
+(defun reg-code (sym)
+  (ecase (intern (symbol-name sym) :cl-asm)
+    ((%al %ax %eax %rax) 0)
+    ((%cl %cx %ecx %rcx) 1)
+    ((%dl %dx %edx %rdx) 2)
+    ((%bl %bx %ebx %rbx) 3)
+    ((%ah %sp %esp %rsp) 4)
+    ((%ch %bp %ebp %rbp) 5)
+    ((%dh %si %esi %rsi) 6)
+    ((%bh %di %edi %rdi) 7)))
+
 (defun @push (arg)
   (assert (= 1 (length arg)))
   (etypecase #1=(car arg)
@@ -93,7 +104,7 @@ ret
 
 (defun reg-type-of (reg)
   (ecase (intern (symbol-name reg) :cl-asm)
-    ((%al %cl %bl %ah %ch %dh %bh)             :r8)
+    ((%al %cl %bl %bl %ah %ch %dh %bh)         :r8)
     ((%ax %cx %dx %bx %sp %bp %si %di)         :r16)
     ((%eax %ecx %edx %ebx %esp %ebp %esi %edi) :r32)
     ((%rax %rcx %rdx %rbx %rsp %rbp %rsi %rdi) :r64)))
@@ -112,11 +123,12 @@ ret
          :address
        (reg-type-of operand)))
     (cons 
-     (destructuring-bind (base-reg offset) operand
-       (assert (and (symbolp (reg-type-of base-reg))
-                    (integerp offset)))
+     (destructuring-bind (tag a &optional b) operand
+       (declare (ignore a b)) ; XXX:
+       (assert (and (eq tag :ref)))
        :m))))
 
+#+C
 (defun @mov (arg)
   (cond ((r/r-p arg)
          `(,+rex.w+ #x89 ,(mk-r/r-modrm (first arg) (second arg))))
@@ -127,6 +139,47 @@ ret
          `(,(+ #xB8 (get-rd (second arg))) ,@(int32-to-bytes (first arg))))
         (t
          (error "unsupported"))))
+
+(defun modrm (mod r/m reg)
+  (+ (ash mod 6)
+     (ash reg 3)
+     (ash r/m 0)))
+
+(defun r/r-modrm (from to)
+  (modrm #b11 (reg-code from) (reg-code to)))
+
+(defparameter +sib.none+ #x25)
+
+(defun r/m-modrm (from to)
+  (destructuring-bind (tag a1 &optional a2) to
+    (declare (ignore tag))
+    (etypecase a1
+      (integer 
+       (assert (null a2))
+       `(,(modrm #b00 #b100 (reg-code from)) ,+sib.none+ ,@(int32-to-bytes a1)))
+      )))
+     
+(defun @mov (arg)
+  (assert (= 2 (length arg)))
+  (destructuring-bind (to from) arg
+    (flatten
+    (ecase (operand-type-of to)
+#|
+      (:m (ecase (operand-type-of from)
+            (:r8   ; 88 /r: MOV r/m8,r8
+             `(,#x88 ,(r/m-modrm from to))) ; todo
+            ))
+|#
+      (:r8 (ecase (operand-type-of from)
+             (:r8  ; 88 /r: MOV r/m8,r8
+              `(#x88 ,(r/r-modrm from to)))
+             (:m   ; 88 /r: MOV r/m8,r8
+              `(#x88 ,(r/m-modrm to from)))
+             ))
+      (:r64 (ecase (operand-type-of from)
+              (:r64 ; REX + 8A /r
+               `(,+rex.w+ #x89 ,(r/r-modrm from to)))))
+      ))))
 
 (defun @add (arg)
   (cond ((r/r-p arg)

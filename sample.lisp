@@ -206,3 +206,24 @@ int pn(int n) {
  (function int int)
  10)
  )
+
+;;;;;;;;;;;;;;;;;;;;;;;;
+;; 関数呼び出し時の定型処理
+(cl-asm:execute 
+ '((:push %rbp)
+   (:mov %rsp %rbp)
+   (:push %rdi)
+   (:push %rsi)
+   (:push %rbx)
+   
+   (:mov %rdi %rax)
+   (:mov %al (:ref 6546448))
+   
+   (:pop %rbx)
+   (:pop %rsi)
+   (:pop %rdi)
+   (:pop %rbp)
+   :ret)
+
+ (function int int)
+ 3)
