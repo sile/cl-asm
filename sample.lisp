@@ -82,12 +82,64 @@
 (cl-asm:execute 
  '((:push %rbp) (:mov %rsp %rbp) (:push %rdi) (:push %rsi) (:push %rbx)
 
-   (:mov 100 %edi)
-   (:call (:extern "pn"))
+   (:mov 32 %edi)
+   (:call (:extern "isspace"))
    
    (:pop %rbx) (:pop %rsi) (:pop %rdi) (:pop %rbp) :ret)
 
  (function int))
+
+;; fib
+(time
+ (cl-asm:execute 
+ '((:push %rbp) (:mov %rsp %rbp) (:push %rdi) (:push %rsi) (:push %rbx)
+   (:mov (%rbp -8) %eax) ; arg
+
+   (:push %eax)
+   (:call fib-begin)
+   (:pop %ebx)
+
+   (:pop %rbx) (:pop %rsi) (:pop %rdi) (:pop %rbp) :ret
+
+   fib-begin
+   (:push %rbp) (:mov %rsp %rbp)
+   (:mov (%rbp 16) %eax) ; arg
+   
+;   (:mov %eax %edi)
+;   (:push %eax)
+;   (:call (:extern "pn"))
+;   (:pop %eax)
+
+   (:mov 2 %edx)
+   (:cmp %eax %edx)
+   (:jmp-if :< fib-end) ; arg < 2
+   
+   (:push %eax)
+
+   (:add -2 %eax)
+   (:push %eax)
+   (:call fib-begin)
+   (:pop %edx)
+   
+   (:pop %edx)
+   (:push %eax)
+   
+   (:mov %edx %eax)
+   (:add -1 %eax)
+   (:push %eax)
+   (:call fib-begin)
+   (:pop %edx)
+   (:pop %edx)
+
+   (:add %edx %eax)
+
+   fib-end
+   (:pop %rbp)
+   :ret)
+
+ (function int int)
+ 40)
+ )
 
 
 ;; TODO: call, data-stack-op
@@ -112,3 +164,45 @@ int pn(int n) {
 
 (cl-asm:assemble '((:jmp-if :< end) (:add %edx %eax) end))
 (cl-asm:assemble '((:call (:extern "p10"))))
+(cl-asm:assemble '((:mov (%rsp 4) %eax)))
+
+
+;; fib
+(time
+ (cl-asm:execute 
+ '((:push %rbp) (:mov %rsp %rbp) (:push %rdi) (:push %rsi) (:push %rbx)
+   (:mov %edi %eax) ; arg
+
+   (:call fib-begin)
+
+   (:pop %rbx) (:pop %rsi) (:pop %rdi) (:pop %rbp) :ret
+
+   fib-begin
+   (:push %rbp) (:mov %rsp %rbp)
+
+   (:mov 2 %edx)
+   (:cmp %eax %edx)
+   (:jmp-if :< fib-end) ; arg < 2
+   
+   (:push %eax)
+
+   (:add -2 %eax)
+   (:call fib-begin)
+   
+   (:pop %edx)
+   (:push %eax)
+   
+   (:mov %edx %eax)
+   (:add -1 %eax)
+   (:call fib-begin)
+   (:pop %edx)
+
+   (:add %edx %eax)
+
+   fib-end
+   (:pop %rbp)
+   :ret)
+
+ (function int int)
+ 10)
+ )

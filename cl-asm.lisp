@@ -83,6 +83,11 @@ ret
        (integerp (first arg))
        (reg-p (second arg))))
 
+(defun i/eax-p (arg)
+  (and (= (length arg) 2)
+       (integerp (first arg))
+       (member (second arg) '(%eax %ax %al) :test #'string=)))
+  
 (defun to-ubyte (n)
   (ldb (byte 8 0) n))
 
@@ -100,6 +105,10 @@ ret
 (defun @add (arg)
   (cond ((r/r-p arg)
          `(#x01 ,(mk-r/r-modrm (first arg) (second arg))))
+        ((i/eax-p arg)
+         (let ((len (integer-length (first arg))))
+           (cond ((< len  8) `(#x04 ,(to-ubyte (first arg))))
+                 (t (error "unsupported")))))
         (t
          (error "unsupported"))))
 
@@ -138,6 +147,7 @@ ret
     (:>  #x72)
     (:>= #x76)
     (:=  #x74)
+    (:zero #x74) ; XXX
     (:/= #x75)
     ))
 
