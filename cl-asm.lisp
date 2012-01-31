@@ -1,26 +1,28 @@
 (in-package :cl-asm)
 
+;;; TODO: 32bit対応
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; types
 (deftype byte-width () '(member 1 2 4 8))
 (deftype address () 'integer)
 
 (defstruct operand)
-(defstruct (reg (:include operand))
-  (name t :type keyword)
-  (size 0 :type byte-width)
+(defstruct (destination (:include operand))
+  (size 0 :type byte-width))
+
+(defstruct (reg (:include destination))
+  (name t :type symbol)
   (code 0 :type (mod 8)))
 
 (defstruct (label (:include operand))
   (name t :type symbol)
   (addr 0 :type address))
 
-(defstruct (imm (:include operand))
-  (size  0 :type byte-width)
+(defstruct (imm (:include destination))
   (value 0 :type integer))
 
-(defstruct (mem (:include operand))
-  (size  0 :type byte-width))
+(defstruct (mem (:include destination)))
 
 (defstruct (mem-direct (:include mem))
   (addr 0 :type address))
@@ -30,14 +32,14 @@
   (offset 0 :type address))
 
 (defparameter *regs*
-  '((%al 1 0) (%ax 2 0) (%eax 3 0) (%rax 4 0)
-    (%cl 1 1) (%cx 2 1) (%ecx 3 1) (%rcx 4 1)
-    (%dl 1 2) (%dx 2 2) (%edx 3 2) (%rdx 4 2)
-    (%bl 1 3) (%bx 2 3) (%ebx 3 3) (%rbx 4 3)
-    (%ah 1 4) (%sp 2 4) (%esp 3 4) (%rsp 4 4)
-    (%ch 1 5) (%bp 2 5) (%ebp 3 5) (%rbp 4 5)
-    (%dh 1 6) (%si 2 6) (%esi 3 6) (%rsi 4 6)
-    (%bh 1 7) (%di 2 7) (%edi 3 7) (%rdi 4 7)))
+  '((%al 1 0) (%ax 2 0) (%eax 4 0) (%rax 8 0)
+    (%cl 1 1) (%cx 2 1) (%ecx 4 1) (%rcx 8 1)
+    (%dl 1 2) (%dx 2 2) (%edx 4 2) (%rdx 8 2)
+    (%bl 1 3) (%bx 2 3) (%ebx 4 3) (%rbx 8 3)
+    (%ah 1 4) (%sp 2 4) (%esp 4 4) (%rsp 8 4)
+    (%ch 1 5) (%bp 2 5) (%ebp 4 5) (%rbp 8 5)
+    (%dh 1 6) (%si 2 6) (%esi 4 6) (%rsi 8 6)
+    (%bh 1 7) (%di 2 7) (%edi 4 7) (%rdi 8 7)))
 
 (defmacro sequence-to-alien-function (seq function-type-spec)
   `(loop WITH len = (length ,seq)
@@ -260,6 +262,51 @@ ret
     (:mem64->xxx
      `(,(mk-mov-op #xA0 to) ,(int-to-bytes 8 (second from))))))
 |#
+
+(defun mem64-p (operand)
+  (and (mem-p operand) (= (mem-size operand) 8)))
+
+(defun r/m-p (operand)
+  (or (reg-p operand) (mem-p operand)))
+
+(defun make-mod-r/m (mod reg/opcode r/m)
+  (+ (ash mod 6) (ash reg/opcode 3) r/m))
+
+(defun mod-r/m (reg/opcode r/m)
+  (flet ((mod-type-of (a b)
+           (cond ((and (reg-p a) (reg-p b)) :r/r)
+                 (t (error "unsupported")))))
+    (ecase (mod-type-of reg/opcode r/m)
+      (:r/r (make-mod-r/m #b11 (reg-code reg/opcode) (reg-code r/m)))
+      )))
+
+
+(def-ins @mov (dst src)
+  (flet ((operands-type-of (dst src)
+           (cond ((and (r/m-p dst) (mem64-p src)) :r/m<-mem64)
+                 ((and (mem64-p dst) (reg-p src)) :mem64<-reg)
+                 ((and (r/m-p dst) (reg-p src))   :r/m<-reg)
+                 ((and (r/m-p dst) (mem-p src))   :r/m<-mem)
+                 ((and (mem-p dst) (imm-p src))   :mem<-imm)
+                 ((and (reg-p dst) (imm-p src))   :reg<-imm)
+                 (t (error "unsupported"))))
+         
+         (op (base &optional (offset 1))
+           (assert (or (not (destination-p src)) 
+                       (= (destination-size dst) (destination-size src))))
+           (case (destination-size dst)
+             (1 base)
+             (2 (list #x66 (+ base offset)))
+             (4 (+ base offset))
+             (8 (list +REX.W+ (+ base offset))))))
+
+    (ecase (operands-type-of dst src)
+      (:r/m<-reg (list (op #x88) (mod-r/m src dst)))
+      (:r/m<-mem )
+      (:mem<-imm )
+      (:reg<-imm )
+      (:mem64<-reg )
+      (:r/m<-mem64 ))))
 
 (defun @add (arg)
   (cond ((r/r-p arg)
