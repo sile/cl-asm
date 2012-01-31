@@ -224,7 +224,7 @@ int pn(int n) {
 ;   (:mov %edi %eax)
 ;   (:mov %eax (:ref 6546448))
 ;   (:mov 1001 %eax)
-   (:mov (:imm64 333) (:ref 6546448))
+   (:mov (:imm64 303) (:ref 6546448))
    
    (:pop %rbx)
    (:pop %rsi)

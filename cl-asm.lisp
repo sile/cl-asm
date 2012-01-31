@@ -192,25 +192,28 @@ ret
        (destructuring-bind ,args ,arg
          (flatten (locally ,@body))))))
 
+(case x
+  (:reg->xxx)
+  (:mem->xxx)
+  (:imm->xxx)
+  (:reg->mem64)
+  (:mem64->xxx))
+
 (def-ins @mov (from to)
-  (if (and (eq (operand-type-of to) :m64)
-           (member (operand-type-of from) '(:r8 :r16 :r32 :r64)))
-      `(,(mk-mov-op #xA2 from) ,@(int-to-bytes 8 (second to)))
-    (ecase (operand-type-of from)
-      ((:imm8 :imm16 :imm32 :imm64)
-       (ecase (operand-type-of to)
-         (:m (destructuring-bind (size n) from
-               (let ((len (ecase size (:imm8 1) (:imm16 2) (:imm32 4) (:imm64 4))))
-                 `(,(mk-mov-op #xC6 from) ,(mk-modrm '%ax to) ,(int-to-bytes len n)))))
-         ((:r8 :r16 :r32 :t64)
-          (let ((len (ecase (operand-type-of from) (:imm8 1) (:imm16 2) (:imm32 4) (:imm64 8))))
-            `(,(mk-mov-op (+ #xb0 (reg-code to)) to 8) ,(int-to-bytes len from))))))
-      (:m64 
-       `(,(mk-mov-op #xA0 to) ,(int-to-bytes 8 (second from))))
-      ((:r8 :r16 :r32 :r64)
-       `(,(mk-mov-op #x88 from) ,(mk-modrm from to)))
-      (:m 
-       `(,(mk-mov-op #x8B to) ,(mk-modrm from to))))))
+  (ecase (bin-type-of from to)
+    (:reg->xxx 
+     `(,(mk-mov-op #x88 from) ,(mk-modrm from to)))
+    (:mem->xxx 
+     `(,(mk-mov-op #x8B to) ,(mk-modrm from to)))
+    (:imm->xxx 
+     (ecase (operand-type-of to)
+       (:m `(,(mk-mov-op #xC6 from) ,(mk-modrm '%ax to) ,(int-to-bytes len n))) ; TODO: len:max4
+       (:reg `(,(mk-mov-op (+ #xb0 (reg-code to)) to 8) ,(int-to-bytes len from))) ; TODO: len
+       ))
+    (:reg->mem64 
+     `(,(mk-mov-op #xA2 from) ,@(int-to-bytes 8 (second to))))
+    (:mem64->xxx
+     `(,(mk-mov-op #xA0 to) ,(int-to-bytes 8 (second from))))))
 
 (defun @add (arg)
   (cond ((r/r-p arg)
