@@ -90,10 +90,10 @@
  (function int))
 
 ;; fib
-(time
+(identity ;time
  (cl-asm:execute 
  '((:push %rbp) (:mov %rsp %rbp) (:push %rdi) (:push %rsi) (:push %rbx)
-   (:mov (%rbp -8) %eax) ; arg
+   (:mov %edi %eax) ; arg
 
    (:push %eax)
    (:call fib-begin)
@@ -138,7 +138,7 @@
    :ret)
 
  (function int int)
- 40)
+ 20)
  )
 
 

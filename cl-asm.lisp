@@ -91,6 +91,32 @@ ret
 (defun to-ubyte (n)
   (ldb (byte 8 0) n))
 
+(defun reg-type-of (reg)
+  (ecase (intern (symbol-name reg) :cl-asm)
+    ((%al %cl %bl %ah %ch %dh %bh)             :r8)
+    ((%ax %cx %dx %bx %sp %bp %si %di)         :r16)
+    ((%eax %ecx %edx %ebx %esp %ebp %esi %edi) :r32)
+    ((%rax %rcx %rdx %rbx %rsp %rbp %rsi %rdi) :r64)))
+
+(defun operand-type-of (operand)
+  (etypecase operand
+    (integer 
+     (let ((len (integer-length operand)))
+       (cond ((< len 08) :imm8)
+             ((< len 16) :imm16)
+             ((< len 32) :imm32)
+             ((< len 64) :imm64)
+             (t (error "unsupported")))))
+    (symbol 
+     (if (char/= #\% (char (symbol-name operand) 0))
+         :address
+       (reg-type-of operand)))
+    (cons 
+     (destructuring-bind (base-reg offset) operand
+       (assert (and (symbolp (reg-type-of base-reg))
+                    (integerp offset)))
+       :m))))
+
 (defun @mov (arg)
   (cond ((r/r-p arg)
          `(,+rex.w+ #x89 ,(mk-r/r-modrm (first arg) (second arg))))
