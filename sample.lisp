@@ -216,8 +216,15 @@ int pn(int n) {
    (:push %rsi)
    (:push %rbx)
    
-   (:mov %rdi %rax)
-   (:mov %al (:ref 6546448))
+;   (:mov %edi %eax)
+;   (:mov 6546447 %ebx)
+;   (:mov %al (:ref %ebx))
+;   (:mov (:ref %ebx 0) %ax)
+
+;   (:mov %edi %eax)
+;   (:mov %eax (:ref 6546448))
+;   (:mov 1001 %eax)
+   (:mov (:imm32 333) (:ref 6546448))
    
    (:pop %rbx)
    (:pop %rsi)
@@ -226,4 +233,6 @@ int pn(int n) {
    :ret)
 
  (function int int)
- 3)
+ #xFF00)
+
+;; TODO: unit-test

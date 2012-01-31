@@ -124,29 +124,23 @@ ret
        (reg-type-of operand)))
     (cons 
      (destructuring-bind (tag a &optional b) operand
-       (declare (ignore a b)) ; XXX:
-       (assert (and (eq tag :ref)))
-       :m))))
-
-#+C
-(defun @mov (arg)
-  (cond ((r/r-p arg)
-         `(,+rex.w+ #x89 ,(mk-r/r-modrm (first arg) (second arg))))
-        ((m/r-p arg) ; ex: (:mov (%rbp -4) %eax)
-         (let* ((displacement (to-ubyte (second (first arg)))))
-           `(#x8B ,(mk-m/r-modrm (caar arg) (second arg)) ,displacement)))
-        ((i/r-p arg) ; ex: (:mov 10 %eax)
-         `(,(+ #xB8 (get-rd (second arg))) ,@(int32-to-bytes (first arg))))
-        (t
-         (error "unsupported"))))
+       (ecase tag
+         (:ref
+          (if (and (null b)
+                   (integerp a)
+                   (>= (integer-length a) 32))
+              :m64
+            :m))
+         ((:imm8 :imm16 :imm32 :imm64) tag))))))
 
 (defun modrm (mod r/m reg)
   (+ (ash mod 6)
      (ash reg 3)
      (ash r/m 0)))
 
+;; TODO: r/m-modrmと統合可能
 (defun r/r-modrm (from to)
-  (modrm #b11 (reg-code from) (reg-code to)))
+  (modrm #b11 (reg-code to) (reg-code from)))
 
 (defparameter +sib.none+ #x25)
 
@@ -157,29 +151,83 @@ ret
       (integer 
        (assert (null a2))
        `(,(modrm #b00 #b100 (reg-code from)) ,+sib.none+ ,@(int32-to-bytes a1)))
+      (symbol
+       (if (null a2)
+           (let ((cd (reg-code a1)))
+             (assert (member cd '(0 1 2 3 6 7)))
+             (modrm #b00 cd (reg-code from)))
+         (let ((cd (reg-code a1)))
+           (assert (member cd '(0 1 2 3 4 6 7)))
+           (ecase (operand-type-of a2)
+             (:imm8 `(,(modrm #b01 cd (reg-code from)) ,(to-ubyte a2)))
+             ((:imm16 :imm32) `(,(modrm #b10 cd (reg-code from)) ,@(int32-to-bytes a2)))))))
       )))
+
+(defun mk-modrm (from to)
+  (if (and (symbolp from) (symbolp to))
+      (r/r-modrm from to)
+    (if (symbolp from)
+        (r/m-modrm from to)
+      (r/m-modrm to from))))
      
+(defun reg-a-p (reg)
+  (member reg '(%al %ax %eax %rax) :test #'string=))
+
+(defun int-to-bytes (width n)
+  (loop FOR i FROM 0 BELOW width
+        COLLECT (ldb (byte 8 (* i 8)) n)))
+
 (defun @mov (arg)
   (assert (= 2 (length arg)))
-  (destructuring-bind (to from) arg
+  (destructuring-bind (from to) arg
     (flatten
-    (ecase (operand-type-of to)
-#|
-      (:m (ecase (operand-type-of from)
-            (:r8   ; 88 /r: MOV r/m8,r8
-             `(,#x88 ,(r/m-modrm from to))) ; todo
+     (if (and (eq (operand-type-of to) :m64)
+              (member (operand-type-of from) '(:r8 :r16 :r32 :r64)))
+         (ecase (operand-type-of from)
+           (:r8 `(#xA2 ,@(int-to-bytes 8 (second to))))
+           (:r16 `(#x66 #xA3 ,@(int-to-bytes 8 (second to))))
+           (:r32 `(#xA3 ,@(int-to-bytes 8 (second to))))
+           (:r64 `(,+rex.w+ #xA3 ,@(int-to-bytes 8 (second to)))))
+       (ecase (operand-type-of from)
+         (:r8 (ecase (operand-type-of to)
+                ((:r8 :m) `(#x88 ,(mk-modrm from to))) ; 88 /r: MOV r/m8,r8
+                ))
+         (:r16 (ecase (operand-type-of to)
+                 ((:r16 :m) `(#x66 #x89 ,(mk-modrm from to))) ; 89 /r: MOV r/m16, r16
+                 ))
+         (:r32 (ecase (operand-type-of to)
+                 ((:r32 :m) `(#x89 ,(mk-modrm from to))) ; 89 /r: MOV r/m32, r32
+                 ))
+         (:r64 (ecase (operand-type-of to)
+                 ((:r64 :m) `(,+rex.w+ #x89 ,(mk-modrm from to))) ; REX + 89 /r
+                 ))
+         ((:imm8 :imm16 :imm32 :imm64)
+          (ecase (operand-type-of to)
+            (:m (destructuring-bind (size n) from
+                  (ecase size
+                    (:imm8 `(#xC6 ,(mk-modrm '%ax to) ,(to-ubyte n))) ; XXX: ax
+                    (:imm16 `(#x66 #xC7 ,(mk-modrm '%ax to) ,@(int-to-bytes 2 n)))
+                    (:imm32 `(#xC7 ,(mk-modrm '%ax to) ,@(int-to-bytes 4 n)))
+                    (:imm64 `(,+rex.w+ #xC7 ,(mk-modrm '%ax to) ,@(int-to-bytes 8 n))))))
+            (:r8 `(,(+ #xb0 (reg-code to)) ,(to-ubyte from)))
+            (:r16 `(#x66 ,(+ #xb8 (reg-code to)) ,@(int-to-bytes 2 from)))
+            (:r32 `(,(+ #xb8 (reg-code to)) ,@(int32-to-bytes from)))
+            (:r64 `(,+rex.w+ ,(+ #xb8 (reg-code to)) ,@(int-to-bytes 8 from)))))
+                     
+         (:m64 
+          (ecase (operand-type-of to)
+            (:r8 `(#xA0 ,@(int-to-bytes 8 (second from))))
+            (:r16 `(#x66 #xA1 ,@(int-to-bytes 8 (second from))))
+            (:r32 `(#xA1 ,@(int-to-bytes 8 (second from))))
+            (:r64 `(,+rex.w+ #xA1 ,@(int-to-bytes 8 (second from))))))
+         (:m 
+          (ecase (operand-type-of to)
+            (:r8 `(#x8A ,(mk-modrm from to))) ; 8A /r: MOV r8,r/m8
+            (:r16 `(#x66 #x8B ,(mk-modrm from to)))
+            (:r32 `(#x8B ,(mk-modrm from to)))
+            (:r64 `(,+rex.w+ #x8B ,(mk-modrm from to)))
             ))
-|#
-      (:r8 (ecase (operand-type-of from)
-             (:r8  ; 88 /r: MOV r/m8,r8
-              `(#x88 ,(r/r-modrm from to)))
-             (:m   ; 88 /r: MOV r/m8,r8
-              `(#x88 ,(r/m-modrm to from)))
-             ))
-      (:r64 (ecase (operand-type-of from)
-              (:r64 ; REX + 8A /r
-               `(,+rex.w+ #x89 ,(r/r-modrm from to)))))
-      ))))
+         )))))
 
 (defun @add (arg)
   (cond ((r/r-p arg)
