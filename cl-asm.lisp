@@ -1,5 +1,44 @@
 (in-package :cl-asm)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; types
+(deftype byte-width () '(member 1 2 4 8))
+(deftype address () 'integer)
+
+(defstruct operand)
+(defstruct (reg (:include operand))
+  (name t :type keyword)
+  (size 0 :type byte-width)
+  (code 0 :type (mod 8)))
+
+(defstruct (label (:include operand))
+  (name t :type symbol)
+  (addr 0 :type address))
+
+(defstruct (imm (:include operand))
+  (size  0 :type byte-width)
+  (value 0 :type integer))
+
+(defstruct (mem (:include operand))
+  (size  0 :type byte-width))
+
+(defstruct (mem-direct (:include mem))
+  (addr 0 :type address))
+
+(defstruct (mem-indirect (:include mem))
+  (reg    0 :type reg)
+  (offset 0 :type address))
+
+(defparameter *regs*
+  '((%al 1 0) (%ax 2 0) (%eax 3 0) (%rax 4 0)
+    (%cl 1 1) (%cx 2 1) (%ecx 3 1) (%rcx 4 1)
+    (%dl 1 2) (%dx 2 2) (%edx 3 2) (%rdx 4 2)
+    (%bl 1 3) (%bx 2 3) (%ebx 3 3) (%rbx 4 3)
+    (%ah 1 4) (%sp 2 4) (%esp 3 4) (%rsp 4 4)
+    (%ch 1 5) (%bp 2 5) (%ebp 3 5) (%rbp 4 5)
+    (%dh 1 6) (%si 2 6) (%esi 3 6) (%rsi 4 6)
+    (%bh 1 7) (%di 2 7) (%edi 3 7) (%rdi 4 7)))
+
 (defmacro sequence-to-alien-function (seq function-type-spec)
   `(loop WITH len = (length ,seq)
          WITH codes = (sb-alien:make-alien sb-alien:unsigned-char len)
@@ -39,6 +78,7 @@ ret
     ((%esi %rsi) 6)
     ((%edi %rdi) 7)))
 
+#+C
 (defun reg-code (sym)
   (ecase (intern (symbol-name sym) :cl-asm)
     ((%al %ax %eax %rax) 0)
@@ -74,6 +114,7 @@ ret
      (ash (get-rd to-reg) 3)
      (ash (get-rd base)   0)))
 
+#+C
 (defun reg-p (sym)
   (and (symbolp sym)
        (member sym '(%rax %rcx %rdx %rbx %rsp %rbp %rsi %rdi
@@ -139,11 +180,13 @@ ret
      (ash r/m 0)))
 
 ;; TODO: r/m-modrmと統合可能
+#+C
 (defun r/r-modrm (from to)
   (modrm #b11 (reg-code to) (reg-code from)))
 
 (defparameter +sib.none+ #x25)
 
+#+C
 (defun r/m-modrm (from to)
   (destructuring-bind (tag a1 &optional a2) to
     (declare (ignore tag))
@@ -192,6 +235,8 @@ ret
        (destructuring-bind ,args ,arg
          (flatten (locally ,@body))))))
 
+
+#|
 (case x
   (:reg->xxx)
   (:mem->xxx)
@@ -214,6 +259,7 @@ ret
      `(,(mk-mov-op #xA2 from) ,@(int-to-bytes 8 (second to))))
     (:mem64->xxx
      `(,(mk-mov-op #xA0 to) ,(int-to-bytes 8 (second from))))))
+|#
 
 (defun @add (arg)
   (cond ((r/r-p arg)
@@ -291,6 +337,7 @@ ret
 (defun @call-unresolve ()
   `(,#xE8 0 0 0 0))
 
+#+C
 (defun assemble (mnemonics)
   (loop WITH labels = '()
         WITH unresolves = '()
@@ -331,6 +378,97 @@ ret
             (1 (setf (nth offset list) pos))))
              
     (return (flatten list))))
+
+(defun operand-label-p (operand)
+  (and (symbolp operand)
+       (char= #\& (char (symbol-name operand) 0))))
+
+(defun operand-register-p (operand)
+  (and (symbolp operand)
+       (member operand *regs* :key #'first :test #'string=)))
+
+(defun mnemonic-label-p (mnemonic)
+  (and (= 1 (length mnemonic))
+       (operand-label-p (first mnemonic))))
+
+(defun mnemonic-instruction-p (mnemonic)
+  (keywordp (first mnemonic)))
+
+;; XXX: name
+(defun imm-byte-width (n)
+  (let ((len (integer-length n)))
+    (cond ((< len 8) 1)
+          ((< len 16) 2)
+          ((< len 32) 4)
+          ((< len 64) 8)
+          (t (error "unsupported")))))
+           
+(defun ref-imm-p (args)
+  (and (= 1 (length args))
+       (integerp args)))
+
+(defun ref-extern-p (args &aux (fst (first args)))
+  (and (= 1 (length args))
+       (consp fst)
+       (eq (first fst) :extern)
+       (stringp (second fst))))
+
+(defun ref-register-p (args)
+  (ignore-errors
+    (destructuring-bind (reg &optional (offset 0)) args
+      (and (operand-register-p reg)
+           (integerp offset)))))
+
+(defun extern-address (name)
+  (declare (ignore name))
+  (error "TODO")) ; TODO
+
+(defun to-operand (operand)
+  (etypecase operand
+    (integer (make-imm :size (imm-byte-width operand) :value operand))
+    (symbol  (cond ((operand-label-p operand)
+                    (make-label :name operand))
+                   ((operand-register-p operand)
+                    (destructuring-bind (name size code) 
+                                        (assoc operand *regs* :test #'string=)
+                      (make-reg :name name :size size :code code)))
+                   (t
+                    (error "unsupported"))))
+    (cons
+     (destructuring-bind (tag . args) operand
+       (ecase tag
+         ((:ref1 :ref2 :ref4 :ref8)
+          (let ((size (case tag (:ref1 1) (:ref2 2) (:ref4 4) (:ref8 8))))
+            (cond ((ref-imm-p args)
+                   (make-mem-direct :size size :addr (first args)))
+                  ((ref-extern-p args)
+                   (make-mem-direct :size size :addr (extern-address (second (first args)))))
+                  ((ref-register-p args)
+                   (destructuring-bind (reg &optional (offset 0)) args
+                     (make-mem-indirect :size size :reg reg :offset offset)))
+                  (t
+                   (error "unsupported"))))))))))
+
+(defun assemble-instruction (opcode operands)
+  (ecase opcode
+    (:mov (@mov operands))))
+
+(defun assemble (mnemonics)
+  (loop WITH labels = '()
+        ;WITH unresolves = '()
+        FOR mnemonic IN (mapcar #'to-list mnemonics)
+    APPEND
+    (cond ((mnemonic-label-p mnemonic)
+           (push (make-label :name (first mnemonic)) labels)
+           '())
+          ((mnemonic-instruction-p mnemonic)
+           (destructuring-bind (opcode . operands) mnemonic
+             (assemble-instruction opcode (mapcar #'to-operand operands))))
+          (t
+           (error "unsupported")))
+    INTO list
+    FINALLY
+    (return list)))
 
 #+SBCL
 (defmacro execute (mnemonics fn-type &rest args)
