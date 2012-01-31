@@ -177,57 +177,40 @@ ret
   (loop FOR i FROM 0 BELOW width
         COLLECT (ldb (byte 8 (* i 8)) n)))
 
-(defun @mov (arg)
-  (assert (= 2 (length arg)))
-  (destructuring-bind (from to) arg
-    (flatten
-     (if (and (eq (operand-type-of to) :m64)
-              (member (operand-type-of from) '(:r8 :r16 :r32 :r64)))
-         (ecase (operand-type-of from)
-           (:r8 `(#xA2 ,@(int-to-bytes 8 (second to))))
-           (:r16 `(#x66 #xA3 ,@(int-to-bytes 8 (second to))))
-           (:r32 `(#xA3 ,@(int-to-bytes 8 (second to))))
-           (:r64 `(,+rex.w+ #xA3 ,@(int-to-bytes 8 (second to)))))
-       (ecase (operand-type-of from)
-         (:r8 (ecase (operand-type-of to)
-                ((:r8 :m) `(#x88 ,(mk-modrm from to))) ; 88 /r: MOV r/m8,r8
-                ))
-         (:r16 (ecase (operand-type-of to)
-                 ((:r16 :m) `(#x66 #x89 ,(mk-modrm from to))) ; 89 /r: MOV r/m16, r16
-                 ))
-         (:r32 (ecase (operand-type-of to)
-                 ((:r32 :m) `(#x89 ,(mk-modrm from to))) ; 89 /r: MOV r/m32, r32
-                 ))
-         (:r64 (ecase (operand-type-of to)
-                 ((:r64 :m) `(,+rex.w+ #x89 ,(mk-modrm from to))) ; REX + 89 /r
-                 ))
-         ((:imm8 :imm16 :imm32 :imm64)
-          (ecase (operand-type-of to)
-            (:m (destructuring-bind (size n) from
-                  (ecase size
-                    (:imm8 `(#xC6 ,(mk-modrm '%ax to) ,(to-ubyte n))) ; XXX: ax
-                    (:imm16 `(#x66 #xC7 ,(mk-modrm '%ax to) ,@(int-to-bytes 2 n)))
-                    (:imm32 `(#xC7 ,(mk-modrm '%ax to) ,@(int-to-bytes 4 n)))
-                    (:imm64 `(,+rex.w+ #xC7 ,(mk-modrm '%ax to) ,@(int-to-bytes 8 n))))))
-            (:r8 `(,(+ #xb0 (reg-code to)) ,(to-ubyte from)))
-            (:r16 `(#x66 ,(+ #xb8 (reg-code to)) ,@(int-to-bytes 2 from)))
-            (:r32 `(,(+ #xb8 (reg-code to)) ,@(int32-to-bytes from)))
-            (:r64 `(,+rex.w+ ,(+ #xb8 (reg-code to)) ,@(int-to-bytes 8 from)))))
-                     
-         (:m64 
-          (ecase (operand-type-of to)
-            (:r8 `(#xA0 ,@(int-to-bytes 8 (second from))))
-            (:r16 `(#x66 #xA1 ,@(int-to-bytes 8 (second from))))
-            (:r32 `(#xA1 ,@(int-to-bytes 8 (second from))))
-            (:r64 `(,+rex.w+ #xA1 ,@(int-to-bytes 8 (second from))))))
-         (:m 
-          (ecase (operand-type-of to)
-            (:r8 `(#x8A ,(mk-modrm from to))) ; 8A /r: MOV r8,r/m8
-            (:r16 `(#x66 #x8B ,(mk-modrm from to)))
-            (:r32 `(#x8B ,(mk-modrm from to)))
-            (:r64 `(,+rex.w+ #x8B ,(mk-modrm from to)))
-            ))
-         )))))
+;; TODO
+(defun mk-mov-op (base opd &optional (offset 1))
+  (ecase (operand-type-of opd)
+    ((:r8 :imm8) `(,base))
+    ((:r16 :imm16) `(#x66 ,(+ base offset)))
+    ((:r32 :imm32) `(,(+ base offset)))
+    ((:r64 :imm64) `(,+rex.w+ ,(+ base offset)))))
+
+(defmacro def-ins (name args &body body)
+  (let ((arg (gensym)))
+    `(defun ,name (,arg)
+       ;; TODO: error message
+       (destructuring-bind ,args ,arg
+         (flatten (locally ,@body))))))
+
+(def-ins @mov (from to)
+  (if (and (eq (operand-type-of to) :m64)
+           (member (operand-type-of from) '(:r8 :r16 :r32 :r64)))
+      `(,(mk-mov-op #xA2 from) ,@(int-to-bytes 8 (second to)))
+    (ecase (operand-type-of from)
+      ((:imm8 :imm16 :imm32 :imm64)
+       (ecase (operand-type-of to)
+         (:m (destructuring-bind (size n) from
+               (let ((len (ecase size (:imm8 1) (:imm16 2) (:imm32 4) (:imm64 4))))
+                 `(,(mk-mov-op #xC6 from) ,(mk-modrm '%ax to) ,(int-to-bytes len n)))))
+         ((:r8 :r16 :r32 :t64)
+          (let ((len (ecase (operand-type-of from) (:imm8 1) (:imm16 2) (:imm32 4) (:imm64 8))))
+            `(,(mk-mov-op (+ #xb0 (reg-code to)) to 8) ,(int-to-bytes len from))))))
+      (:m64 
+       `(,(mk-mov-op #xA0 to) ,(int-to-bytes 8 (second from))))
+      ((:r8 :r16 :r32 :r64)
+       `(,(mk-mov-op #x88 from) ,(mk-modrm from to)))
+      (:m 
+       `(,(mk-mov-op #x8B to) ,(mk-modrm from to))))))
 
 (defun @add (arg)
   (cond ((r/r-p arg)

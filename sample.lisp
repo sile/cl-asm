@@ -224,7 +224,7 @@ int pn(int n) {
 ;   (:mov %edi %eax)
 ;   (:mov %eax (:ref 6546448))
 ;   (:mov 1001 %eax)
-   (:mov (:imm32 333) (:ref 6546448))
+   (:mov (:imm64 333) (:ref 6546448))
    
    (:pop %rbx)
    (:pop %rsi)
@@ -236,3 +236,5 @@ int pn(int n) {
  #xFF00)
 
 ;; TODO: unit-test
+
+; アセンブラを書くのが少し楽しくなってきた。本筋からは外れていってるけど。
