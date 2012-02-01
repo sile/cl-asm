@@ -236,3 +236,47 @@ int pn(int n) {
  #xFF00)
 
 ;; TODO: unit-test
+(defparameter save-stack@ '((:push %rbp) (:mov %rbp %rsp) (:push %rdi) (:push %rsi) (:push %rbx)))
+(defparameter restore-stack@ '((:pop %rbx) (:pop %rsi) (:pop %rdi) (:pop %rbp)))
+(defparameter in@ save-stack@)
+(defparameter out@ `(,@restore-stack@ :ret))
+
+(defmacro body (&rest mnemonics)
+  `'(,@in@
+     ,@mnemonics
+     ,@out@))
+
+(cl-asm:execute
+ (body 
+  &abc
+  (:mov %eax 22)
+  (:jmp &next)
+
+  (:add %eax %eax)
+  (:jmp &abc)
+  &next
+  (:add %eax %eax)
+  )
+ (function int))
+
+(cl-asm:assemble
+ (body
+  (:mov %eax 22)
+  (:jmp &next)
+  (:add %eax %eax)
+  (:add %eax %eax)
+  &next))
+
+(cl-asm:assemble
+ '(
+  &abc
+  (:mov %eax 22)
+  (:jmp &next)
+
+  (:add %eax %eax)
+
+  (:jmp &abc)
+  &next
+  (:add %eax %eax)
+
+  ))

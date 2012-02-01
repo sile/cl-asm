@@ -17,6 +17,7 @@
 
 (defstruct (label (:include operand))
   (name t :type symbol)
+  (pos  0 :type fixnum)
   (addr 0 :type address))
 
 (defstruct (imm (:include operand))
@@ -42,8 +43,9 @@
     (%dh 1 6) (%si 2 6) (%esi 4 6) (%rsi 8 6)
     (%bh 1 7) (%di 2 7) (%edi 4 7) (%rdi 8 7)))
 
-(defmacro sequence-to-alien-function (seq function-type-spec)
-  `(loop WITH len = (length ,seq)
+(defmacro sequence-to-alien-function (seq-form function-type-spec &aux (seq (gensym)))
+  `(loop WITH ,seq = ,seq-form
+         WITH len = (length ,seq)
          WITH codes = (sb-alien:make-alien sb-alien:unsigned-char len)
          FOR i FROM 0 BELOW len 
      DO
@@ -227,7 +229,18 @@
         (:r/m<-imm (list (op #x80) (mod-r/m 5 dst) (disp (imm-value src))))
         (:r/m<-imm8 (list (op #x82) (mod-r/m 5 dst) (disp (imm-value src) 1)))
         (:r/m<-reg (list (op #x28) (mod-r/m src dst)))
-        (:reg<-r/m (list (op #x2A) (mod-r/m dst src))))))    )
+        (:reg<-r/m (list (op #x2A) (mod-r/m dst src)))))))
+
+(flet ((operand-type-of (o)
+         (cond ((and (imm-p o) (=  (imm-size o) 1)) :imm8)
+               ((and (imm-p o) (<= (imm-size o) 4)) :imm32)
+               ((and (r/m-p o) (= (destination-size o) 8)) :r/m64)
+               (t (error "unsupported")))))
+  (def-ins @jmp (dst)
+    (ecase (operand-type-of dst)
+      (:imm8  (list #xEB (int-to-bytes 1 (imm-value dst))))
+      (:imm32 (list #xE9 (int-to-bytes 4 (imm-value dst))))
+      (:r/m64 (list #xFF (mod-r/m 4 dst))))))
 
 (defun to-list (x) (if (listp x) x (list x)))
 
@@ -320,26 +333,86 @@
     (:pop (@pop operands))
     (:add (@add operands))
     (:sub (@sub operands))
-    ;; jmp, jcc, cmp, call
+    (:jmp (@jmp operands))
+    ;; jcc, cmp, call
     ;; label
     ))
 
+(defparameter *op-label-defs*
+  '(
+    (:jmp #|index|# 1 #|ins-default-len|# 4 #|disp-len-map|# ((4 4) (2 4) (1 1)))
+    ))
+
+(defun mnemonic-unresolve-p (mnemonic)
+  (and (mnemonic-instruction-p mnemonic)
+       (let ((def (assoc (first mnemonic) *op-label-defs*)))
+         (when def
+           (mnemonic-label-p (list (nth (second def) mnemonic)))))))
+
+(defun adjust-pos (pos diffs &optional (include t))
+  (+ pos
+     (loop FOR (_ p d) IN diffs
+           WHILE (if include (<= p pos) (< p pos))
+           SUM d)))
+
+(defun ninsert (list pos list2)
+  (append (subseq list 0 (1- pos))
+          list2
+          (subseq list pos)))
+
 (defun assemble (mnemonics)
-  (loop WITH labels = '()
-        ;WITH unresolves = '()
+  (macrolet ((label-addr (name)  `(gethash ,name label-addr))
+             (pc () `(length list))
+             (get-label (mnemonic) `(nth (second (assoc (first ,mnemonic) *op-label-defs*))
+                                         ,mnemonic))
+             (get-ins-size (mnemonic &optional imm-size)
+               `(let ((def (assoc (first ,mnemonic) *op-label-defs*)))
+                  (second (assoc (or ,imm-size (third def)) (fourth def))))))
+
+  (loop WITH label-addr = (make-hash-table)
+        WITH unresolves = '()
         FOR mnemonic IN (mapcar #'to-list mnemonics)
     APPEND
     (cond ((mnemonic-label-p mnemonic)
-           (push (make-label :name (first mnemonic)) labels)
+           (setf (label-addr (first mnemonic)) (pc))
            '())
+          ((mnemonic-unresolve-p mnemonic)
+           (push (list mnemonic (1+ (pc)) (get-ins-size mnemonic) nil) unresolves)
+           `(,(first mnemonic)))
           ((mnemonic-instruction-p mnemonic)
            (destructuring-bind (opcode . operands) mnemonic
              (assemble-instruction opcode (mapcar #'to-operand operands))))
           (t
            (error "unsupported")))
     INTO list
+
     FINALLY
-    (return list)))
+    ;; ラベル参照解決
+    ;; TODO: 整理
+    (setf unresolves (reverse unresolves))
+    (loop WHILE
+      (loop WITH changed = nil
+            FOR unresolve IN unresolves
+            FOR (mnemonic pos ins-size _) = unresolve
+            FOR label-pos = (label-addr (get-label mnemonic))
+            FOR offset = (- (adjust-pos label-pos unresolves) (adjust-pos pos unresolves))
+            FOR new-ins-size = (get-ins-size mnemonic (imm-byte-width offset))
+        DO
+        (setf (fourth unresolve) offset
+              (third unresolve) new-ins-size
+              changed (/= ins-size new-ins-size))
+        FINALLY
+        (return changed)))
+
+    (loop FOR (mnemonic pos ins-size offset) IN unresolves
+      DO
+      (setf (get-label mnemonic) offset
+            list (ninsert 
+                  list
+                  (adjust-pos pos unresolves nil)
+                  (assemble-instruction (car mnemonic) 
+                                        (mapcar #'to-operand (cdr mnemonic))))))
+    (return list))))
 
 #+SBCL
 (defmacro execute (mnemonics fn-type &rest args)
