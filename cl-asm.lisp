@@ -70,7 +70,7 @@
     `(defun ,name (,arg)
        ;; TODO: error message
        (destructuring-bind ,args ,arg
-         (flatten (locally (to-list ,@body)))))))
+         (flatten (to-list (locally ,@body)))))))
 
 ;; XXX: 分かりにくい名前
 (defun mem64-p (operand)
@@ -108,11 +108,13 @@
 (defun mod-r/m (reg/opcode r/m)
   (flet ((mod-type-of (r/o r/m)
            (cond ((and (integerp r/o) (mem-p r/m)) :o/m)
+                 ((and (integerp r/o) (reg-p r/m)) :o/r)
                  ((and (reg-p r/o) (reg-p r/m)) :r/r)
                  ((and (reg-p r/o) (mem-p r/m)) :r/m)
                  (t (error "unsupported")))))
     (ecase (mod-type-of reg/opcode r/m)
       (:r/r (make-mod-r/m #b11 (reg-code reg/opcode) (reg-code r/m)))
+      (:o/r (make-mod-r/m #b11 reg/opcode (reg-code r/m)))
       (:r/m (make-r/m-mod-r/m reg/opcode r/m))
       (:o/m (make-o/m-mod-r/m reg/opcode r/m))
       )))
@@ -156,7 +158,6 @@
 (def-ins @ret ()
   #xC3)
 
-
 (flet ((operand-type-of (o)
          (cond ((and (mem-p o) (= 2 (mem-size o))) :mem16)
                ((and (mem-p o) (= 8 (mem-size o))) :mem64)
@@ -183,6 +184,38 @@
       (:mem64 (list #x8F (mod-r/m 0 dst)))
       (:reg16 (list #x66 (+ #x58 (reg-code dst))))
       (:reg64 (list (+ #x58 (reg-code dst)))))))
+
+(def-ins @add (dst src)
+  (flet ((operands-type-of (d s)
+           (cond ((and (r/m-p d) (> (destination-size d) 1)
+                       (imm-p s) (= (imm-size s) 1)) :r/m<-imm8)
+                 ((and (reg@a-p d) (imm-p s)) :reg@a<-imm)
+                 ((and (r/m-p d) (imm-p s)) :r/m<-imm)
+                 ((and (r/m-p d) (reg-p s)) :r/m<-reg)
+                 ((and (reg-p d) (r/m-p s)) :reg<-r/m)
+                 (t (error "unsupported"))))
+
+         (op (base &optional (offset 1))
+           (assert (or (not (destination-p src)) 
+                       (= (destination-size dst) (destination-size src))))
+           (case (destination-size dst)
+             (1 base)
+             (2 (list #x66 (+ base offset)))
+             (4 (+ base offset))
+             (8 (list +REX.W+ (+ base offset)))))
+
+         (disp (n &optional (size (destination-size dst)) (max 4))
+           (int-to-bytes (min size max) n)))
+
+    (ecase (operands-type-of dst src)
+      (:reg@a<-imm (list (op #x04) (disp (imm-value src))))
+      (:r/m<-imm (list (op #x80) (mod-r/m 0 dst) (disp (imm-value src))))
+      (:r/m<-imm8 (list (op #x82) (mod-r/m 0 dst) (disp (imm-value src) 1)))
+      (:r/m<-reg (list (op #x00) (mod-r/m src dst)))
+      (:reg<-r/m (list (op #x02) (mod-r/m dst src))))))
+
+(def-ins @sub (dst src)
+  )
 
 (defun to-list (x) (if (listp x) x (list x)))
 
@@ -254,7 +287,7 @@
                        (integerp (first args))))
           (let ((size (ecase tag (:immb 1) (:immw 2) (:immd 4) (:immq 8))))
             (make-imm :size size :value (first args))))
-         ((:refb :refw :refd :refq)
+         ((:refb :refw :refd :refq); TODO: (:size16 (:ref ...))とかを必要な時だけ行えば良いようにする
           (let ((size (case tag (:refb 1) (:refw 2) (:refd 4) (:refq 8))))
             (cond ((ref-imm-p args)
                    (make-mem-direct :size size :addr (first args)))
@@ -273,6 +306,10 @@
     (:ret (@ret operands))
     (:push (@push operands))
     (:pop (@pop operands))
+    (:add (@add operands))
+    (:sub (@sub operands))
+    ;; jmp, jcc, cmp, call
+    ;; label
     ))
 
 (defun assemble (mnemonics)
