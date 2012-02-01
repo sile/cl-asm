@@ -11,7 +11,7 @@
 (defstruct (destination (:include operand))
   (size 0 :type byte-width))
 
-(defstruct (reg (:include destination))
+(defstruct (reg (:include destination)) ;; XXX: incorrect-name
   (name t :type symbol)
   (code 0 :type (mod 8)))
 
@@ -20,6 +20,7 @@
   (addr 0 :type address))
 
 (defstruct (imm (:include operand))
+  (size 0 :type byte-width)
   (value 0 :type integer))
 
 (defstruct (mem (:include destination)))
@@ -155,65 +156,34 @@
 (def-ins @ret ()
   #xC3)
 
+(def-ins @push (src)
+  (flet ((operand-type-of (o)
+           (cond ((and (mem-p o) (= 2 (mem-size o))) :mem16)
+                 ((and (mem-p o) (= 8 (mem-size o))) :mem64)
+                 ((and (reg-p o) (= 2 (reg-size o))) :reg16)
+                 ((and (reg-p o) (= 8 (reg-size o))) :reg64)
+                 ((and (imm-p o) (= 1 (imm-size o))) :imm8)
+                 ((and (imm-p o) (= 2 (imm-size o))) :imm16)
+                 ((and (imm-p o) (= 4 (imm-size o))) :imm32)
+                 (t (error "unsupported")))))
+    (ecase (operand-type-of src)
+      (:mem16 (list #x66 #xFF (mod-r/m 6 src)))
+      (:mem64 (list #xFF (mod-r/m 6 src)))
+      (:reg16 (list #x66 (+ #x50 (reg-code src))))
+      (:reg64 (list (+ #x50 (reg-code src))))
+      (:imm8  (list #x6A (int-to-bytes 1 (imm-value src))))
+      (:imm16 (list #x66 #x68 (int-to-bytes 2 (imm-value src))))
+      (:imm32 (list #x68 (int-to-bytes 4 (imm-value src)))))))
+
+(def-ins @pop (dst)
+  )
+
 (defun to-list (x) (if (listp x) x (list x)))
 
 #+SBCL
 (defun extern-fn-ptr (name)
   (let ((fn (eval `(sb-alien:extern-alien ,name (function sb-alien:int)))))
     (sb-sys:sap-int (sb-alien:alien-sap fn))))
-
-(defun @call (arg)
-  (assert (= 1 (length arg)))
-  (typecase #1=(first arg)
-    (integer `(,#xE8 ,@(int32-to-bytes #1#)))
-    (cons
-     (destructuring-bind (tag name) #1#
-       (assert (eq tag :extern))
-       (let ((ptr (extern-fn-ptr name)))
-         (append (@mov `(,ptr %eax)) ; TODO: 64bit mov
-                 `(#xFF ,#b11010000))))))) ; /2 = 010
-
-#+C
-(defun assemble (mnemonics)
-  (loop WITH labels = '()
-        WITH unresolves = '()
-        FOR mnemonic IN (mapcar #'to-list mnemonics)
-    APPEND
-    (if (not (keywordp (car mnemonic)))
-        ;; label
-        (progn (push (cons (car mnemonic) (length list)) labels)
-               '())
-      (to-list
-       (ecase (car mnemonic)
-         (:push (@push (cdr mnemonic)))
-         (:pop (@pop (cdr mnemonic)))
-         (:mov (@mov (cdr mnemonic)))
-         (:add (@add (cdr mnemonic)))
-         (:sub (@sub (cdr mnemonic)))
-         (:cmp (@cmp (cdr mnemonic)))
-         (:call (if (symbolp (second mnemonic))
-                    (progn (push (list (second mnemonic) (1+ (length list)) 4) unresolves)
-                           (@call-unresolve))
-                  (@call (cdr mnemonic))))
-         (:jmp (if (symbolp (second mnemonic))
-                   (progn (push (list (second mnemonic) (1+ (length list)) 4) unresolves)
-                          (@jmp-unresolve))
-                 (@jmp (cdr mnemonic))))
-         (:jmp-if (if (symbolp (third mnemonic))
-                      (progn (push (list (third mnemonic) (1+ (length list)) 1) unresolves)
-                             (@jmp-if-unresolve (cdr mnemonic)))
-                    (@jmp-if (cdr mnemonic))))
-         (:ret (@ret (cdr mnemonic))))))
-    INTO list
-    FINALLY
-    (loop FOR (sym offset len) IN unresolves
-          FOR pos = (- (cdr (assoc sym labels)) (+ len offset)) ; relative
-          DO
-          (ecase len
-            (4 (setf (subseq list offset (+ offset 4)) (int32-to-bytes pos)))
-            (1 (setf (nth offset list) pos))))
-             
-    (return (flatten list))))
 
 (defun operand-label-p (operand)
   (and (symbolp operand)
@@ -261,7 +231,7 @@
 
 (defun to-operand (operand)
   (etypecase operand
-    (integer (make-imm :value operand))
+    (integer (make-imm :size (imm-byte-width operand) :value operand))
     (symbol  (cond ((operand-label-p operand)
                     (make-label :name operand))
                    ((operand-register-p operand)
@@ -273,8 +243,13 @@
     (cons
      (destructuring-bind (tag . args) operand
        (ecase tag
-         ((:ref1 :ref2 :ref4 :ref8)
-          (let ((size (case tag (:ref1 1) (:ref2 2) (:ref4 4) (:ref8 8))))
+         ((:immb :immw :immd :immq)
+          (assert (and (= 1 (length args))
+                       (integerp (first args))))
+          (let ((size (ecase tag (:immb 1) (:immw 2) (:immd 4) (:immq 8))))
+            (make-imm :size size :value (first args))))
+         ((:refb :refw :refd :refq)
+          (let ((size (case tag (:refb 1) (:refw 2) (:refd 4) (:refq 8))))
             (cond ((ref-imm-p args)
                    (make-mem-direct :size size :addr (first args)))
                   ((ref-extern-p args)
@@ -288,7 +263,11 @@
 
 (defun assemble-instruction (opcode operands)
   (ecase opcode
-    (:mov (@mov operands))))
+    (:mov (@mov operands))
+    (:ret (@ret operands))
+    (:push (@push operands))
+    (:pop (@pop operands))
+    ))
 
 (defun assemble (mnemonics)
   (loop WITH labels = '()
