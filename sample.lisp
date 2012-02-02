@@ -248,12 +248,39 @@ int pn(int n) {
      ,@out@))
  )
 
-(cl-asm:execute
- (body 
-  (:mov %eax 10)
-  (:cmp %eax 10)
-  (:jcc ?a &end)
-  (:add %eax 1)
-  &end
-  )
- (function int))
+(time
+ (cl-asm:execute
+ (body
+  (:mov %eax %edi)
+  (:call &fib-beg)
+  (:jmp &finish)
+
+  &fib-beg
+  (:push %rbp) 
+  (:mov %rbp %rsp)
+
+  (:cmp %eax 2)
+  (:jl &fib-end)
+  
+  (:push %rax)
+  (:sub %eax 2)
+  (:call &fib-beg)
+  
+  (:pop %rdx)
+  (:push %rax)
+  
+  (:mov %eax %edx)
+  (:sub %eax 1) ; TODO: dec, inc
+  (:call &fib-beg)
+  (:pop %rdx)
+  
+  (:add %eax %edx)
+
+  &fib-end
+  (:pop %rbp)
+  :ret
+  
+  &finish)
+
+ (function int int)
+ 40))

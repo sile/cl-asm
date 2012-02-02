@@ -239,6 +239,27 @@
         (:r/m<-reg (list (op #x38) (mod-r/m src dst)))
         (:reg<-r/m (list (op #x3A) (mod-r/m dst src)))))))
 
+(flet ((op (code dst)
+         (when (not (r/m-p dst))
+           (error "unsupported"))
+         (ecase (destination-size dst)
+           (1 (list #xFE (mod-r/m code dst)))
+           (2 (list #x66 #xFF (mod-r/m code dst)))
+           (4 (list #xFF (mod-r/m code dst)))
+           (8 (list +REX.W+ #xFF (mod-r/m code dst))))))
+
+  (def-ins @inc (dst) (op 0 dst))
+  (def-ins @dec (dst) (op 1 dst)))
+
+(def-ins @dec (dst)
+  (when (not (r/m-p dst))
+    (error "unsupported"))
+  (ecase (destination-size dst)
+    (1 (list #xFE (mod-r/m 1 dst)))
+    (2 (list #x66 #xFF (mod-r/m 1 dst)))
+    (4 (list #xFF (mod-r/m 1 dst)))
+    (8 (list +REX.W+ #xFF (mod-r/m 1 dst)))))
+
 (defun jcc-cond-op (cnd imm)
   (multiple-value-bind (code imm32-compatible)
                        (ecase cnd
@@ -274,7 +295,7 @@
 
   (def-ins @call (dst)
     (ecase (operand-type-of dst)
-      (:imm32 (list #xE8 (int-to-bytes 4 (imm-value dst))))
+      ((:imm8 :imm32) (list #xE8 (int-to-bytes 4 (imm-value dst))))
       (:r/m64 (list #xFF (mod-r/m 2 dst)))))
 
   (def-ins @jmp (dst)
@@ -382,6 +403,8 @@
     (:pop (@pop operands))
     (:add (@add operands))
     (:sub (@sub operands))
+    (:inc (@inc operands))
+    (:dec (@dec operands))
     (:cmp (@cmp operands))
     (:jmp (@jmp operands))
     (:call (@call operands))
@@ -392,12 +415,15 @@
 
 (defparameter *op-label-defs*
   `(
+    (:call 1 4 ((4 4) (2 4) (1 4)))
     (:jmp #|index|# 1 #|default-imm-size|# 4 #|disp-len-map|# ((4 4) (2 4) (1 1)))
 
+    (:jrcxz 1 1 ((1 2)))
+    (:jecxz 1 1 ((1 1)))
     ,@(mapcar (lambda (op)
-                `(,op #|index|# 1 #|default-imm-size|# 4 #|disp-len-map|# ((4 5) (2 5) (1 2))))
-              '(:ja :jae :jb :jbe :jc :je :jecxz :jg :jge :jl :jle :jna :jnae :jnb :jnbe :jnc
-                :jne :jng :jnge :jnl :jnle :jno :jnp :jns :jnz :jo :jp :jpe :jpo :jrcxz :js :jz))
+                `(,op #|index|# 1 #|default-imm-size|# 4 #|disp-len-map|# ((4 4) (2 4) (1 1))))
+              '(:ja :jae :jb :jbe :jc :je :jg :jge :jl :jle :jna :jnae :jnb :jnbe :jnc
+                :jne :jng :jnge :jnl :jnle :jno :jnp :jns :jnz :jo :jp :jpe :jpo :js :jz))
     ))
 
 (defun mnemonic-unresolve-p (mnemonic)
@@ -457,7 +483,7 @@
         DO
         (setf (fourth unresolve) offset
               (third unresolve) new-ins-size
-              changed (/= ins-size new-ins-size))
+              changed (or changed (/= ins-size new-ins-size)))
         FINALLY
         (return changed)))
 
