@@ -248,7 +248,12 @@
     (ecase (operand-type-of dst)
       (:imm8  (list #xEB (int-to-bytes 1 (imm-value dst))))
       (:imm32 (list #xE9 (int-to-bytes 4 (imm-value dst))))
-      (:r/m64 (list #xFF (mod-r/m 4 dst))))))
+      (:r/m64 (list #xFF (mod-r/m 4 dst)))))
+
+  (def-ins @call (dst)
+    (ecase (operand-type-of dst)
+      (:imm32 (list #xE8 (int-to-bytes 4 (imm-value dst))))
+      (:r/m64 (list #xFF (mod-r/m 2 dst))))))
 
 (defun to-list (x) (if (listp x) x (list x)))
 
@@ -346,6 +351,7 @@
     (:sub (@sub operands))
     (:cmp (@cmp operands))
     (:jmp (@jmp operands))
+    (:call (@call operands))
     ;; jcc,  call
     ;; label
     ))
