@@ -2,7 +2,7 @@
 
 (defsystem cl-asm
   :name "cl-asm"
-  :version "0.0.1"
+  :version "0.0.2"
   :author "Takeru Ohta"
   :description "A x86 assembler in Common Lisp"
 
