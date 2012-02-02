@@ -149,7 +149,7 @@
 
     (ecase (operands-type-of dst src)
       (:r/m<-reg (list (op #x88) (mod-r/m src dst)))
-      (:r/m<-mem (list (op #x8B) (mod-r/m dst src)))
+      (:r/m<-mem (list (op #x8A) (mod-r/m dst src)))
       (:reg<-imm (list (op (+ #xB0 (reg-code dst)) 8) (disp (imm-value src))))
       (:mem<-imm (list (op #xC6) (mod-r/m 0 dst) (disp (imm-value src))))
       (:mem64<-reg@a (list (op #xA2) (disp (mem-direct-addr dst) 8))) ; XXX: 32bit対応
@@ -239,21 +239,54 @@
         (:r/m<-reg (list (op #x38) (mod-r/m src dst)))
         (:reg<-r/m (list (op #x3A) (mod-r/m dst src)))))))
 
+(defun jcc-cond-op (cnd imm)
+  (multiple-value-bind (code imm32-compatible)
+                       (ecase cnd
+                         (:jo (values #x70 t))
+                         (:jno (values #x71 t))
+                         ((:jb :jc :jnae) (values #x72 t))
+                         ((:jae :jnb :jnc) (values #x73 t))
+                         ((:je :jz) (values #x74 t))
+                         ((:jne :jnz) (values #x75 t))
+                         ((:jbe :jna) (values #x76 t))
+                         ((:ja :jnbe) (values #x77 t))
+                         (:js (values #x78 t))
+                         (:jns (values #x79 t))
+                         ((:jp :jpe) (values #x7A t))
+                         ((:jnp :jpo) (values #x7B t))
+                         ((:jl :jnge) (values #x7C t))
+                         ((:jge :jnl) (values #x7D t))
+                         ((:jle :jng) (values #x7E t))
+                         ((:jg :jnle) (values #x7F t))
+                         (:jecxz (values #xE3 nil))
+                         (:jrcxz (values '(#x67 #xE3) nil)))
+    (ecase (imm-size imm)
+      (1 code)
+      (4 (if imm32-compatible
+             (+ code #x10)
+           (error "unsupported"))))))
+
 (flet ((operand-type-of (o)
          (cond ((and (imm-p o) (=  (imm-size o) 1)) :imm8)
                ((and (imm-p o) (<= (imm-size o) 4)) :imm32)
                ((and (r/m-p o) (= (destination-size o) 8)) :r/m64)
                (t (error "unsupported")))))
+
+  (def-ins @call (dst)
+    (ecase (operand-type-of dst)
+      (:imm32 (list #xE8 (int-to-bytes 4 (imm-value dst))))
+      (:r/m64 (list #xFF (mod-r/m 2 dst)))))
+
   (def-ins @jmp (dst)
     (ecase (operand-type-of dst)
       (:imm8  (list #xEB (int-to-bytes 1 (imm-value dst))))
       (:imm32 (list #xE9 (int-to-bytes 4 (imm-value dst))))
       (:r/m64 (list #xFF (mod-r/m 4 dst)))))
 
-  (def-ins @call (dst)
+  (def-ins @jcc (opcode dst)
     (ecase (operand-type-of dst)
-      (:imm32 (list #xE8 (int-to-bytes 4 (imm-value dst))))
-      (:r/m64 (list #xFF (mod-r/m 2 dst))))))
+      (:imm8  (list (jcc-cond-op opcode dst) (int-to-bytes 1 (imm-value dst))))
+      (:imm32 (list (jcc-cond-op opcode dst) (int-to-bytes 4 (imm-value dst)))))))
 
 (defun to-list (x) (if (listp x) x (list x)))
 
@@ -352,13 +385,19 @@
     (:cmp (@cmp operands))
     (:jmp (@jmp operands))
     (:call (@call operands))
-    ;; jcc,  call
-    ;; label
+    ((:ja :jae :jb :jbe :jc :je :jecxz :jg :jge :jl :jle :jna :jnae :jnb :jnbe :jnc
+      :jne :jng :jnge :jnl :jnle :jno :jnp :jns :jnz :jo :jp :jpe :jpo :jrcxz :js
+      :jz) (@jcc (cons opcode operands)))
     ))
 
 (defparameter *op-label-defs*
-  '(
-    (:jmp #|index|# 1 #|ins-default-len|# 4 #|disp-len-map|# ((4 4) (2 4) (1 1)))
+  `(
+    (:jmp #|index|# 1 #|default-imm-size|# 4 #|disp-len-map|# ((4 4) (2 4) (1 1)))
+
+    ,@(mapcar (lambda (op)
+                `(,op #|index|# 1 #|default-imm-size|# 4 #|disp-len-map|# ((4 5) (2 5) (1 2))))
+              '(:ja :jae :jb :jbe :jc :je :jecxz :jg :jge :jl :jle :jna :jnae :jnb :jnbe :jnc
+                :jne :jng :jnge :jnl :jnle :jno :jnp :jns :jnz :jo :jp :jpe :jpo :jrcxz :js :jz))
     ))
 
 (defun mnemonic-unresolve-p (mnemonic)

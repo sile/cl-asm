@@ -250,14 +250,10 @@ int pn(int n) {
 
 (cl-asm:execute
  (body 
-  &abc
-  (:mov %eax 22)
-  (:jmp &next)
-
-  (:add %eax %eax)
-  (:jmp &abc)
-  &next
-  (:add %eax %eax)
-
+  (:mov %eax 10)
+  (:cmp %eax 10)
+  (:jcc ?a &end)
+  (:add %eax 1)
+  &end
   )
  (function int))
