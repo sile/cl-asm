@@ -256,6 +256,7 @@ int pn(int n) {
   (:jmp &abc)
   &next
   (:add %eax %eax)
+
   )
  (function int))
 
@@ -280,3 +281,17 @@ int pn(int n) {
   (:add %eax %eax)
 
   ))
+
+(cl-asm:execute
+ (body
+  (:mov %eax 1)
+  (:jmp &a)
+  &b
+  (:add %eax 1)
+  (:jmp &c)
+  &a
+  (:add %eax 1)
+  (:jmp &b)
+  &c
+  )
+ (function int))

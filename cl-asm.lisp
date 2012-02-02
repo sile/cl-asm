@@ -229,7 +229,15 @@
         (:r/m<-imm (list (op #x80) (mod-r/m 5 dst) (disp (imm-value src))))
         (:r/m<-imm8 (list (op #x82) (mod-r/m 5 dst) (disp (imm-value src) 1)))
         (:r/m<-reg (list (op #x28) (mod-r/m src dst)))
-        (:reg<-r/m (list (op #x2A) (mod-r/m dst src)))))))
+        (:reg<-r/m (list (op #x2A) (mod-r/m dst src)))))
+
+    (def-ins @cmp (dst src)
+      (ecase (operands-type-of dst src)
+        (:reg@a<-imm (list (op #x3C) (disp (imm-value src))))
+        (:r/m<-imm (list (op #x80) (mod-r/m 7 dst) (disp (imm-value src))))
+        (:r/m<-imm8 (list (op #x82) (mod-r/m 7 dst) (disp (imm-value src) 1)))
+        (:r/m<-reg (list (op #x38) (mod-r/m src dst)))
+        (:reg<-r/m (list (op #x3A) (mod-r/m dst src)))))))
 
 (flet ((operand-type-of (o)
          (cond ((and (imm-p o) (=  (imm-size o) 1)) :imm8)
@@ -333,8 +341,9 @@
     (:pop (@pop operands))
     (:add (@add operands))
     (:sub (@sub operands))
+    (:cmp (@cmp operands))
     (:jmp (@jmp operands))
-    ;; jcc, cmp, call
+    ;; jcc,  call
     ;; label
     ))
 
