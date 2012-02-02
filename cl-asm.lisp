@@ -298,8 +298,8 @@
            (integerp offset)))))
 
 (defun extern-address (name)
-  (declare (ignore name))
-  (error "TODO")) ; TODO
+  (let ((fn (eval `(sb-alien:extern-alien ,name (function sb-alien:int)))))
+    (sb-sys:sap-int (sb-alien:alien-sap fn))))
 
 (defun to-operand (operand)
   (etypecase operand
@@ -315,6 +315,9 @@
     (cons
      (destructuring-bind (tag . args) operand
        (ecase tag
+         (:extern
+          (assert (= 1 (length args)))
+          (make-imm :size 8 :value (extern-address (first args))))
          ((:immb :immw :immd :immq)
           (assert (and (= 1 (length args))
                        (integerp (first args))))
