@@ -395,8 +395,23 @@
                   (t
                    (error "unsupported"))))))))))
 
+(def-ins @hlt ()
+  #xF4)
+
+(def-ins @nop (&optional dst)
+  (if (null dst)
+      #x90
+    (cond ((and (r/m-p dst) (= (destination-size dst) 2)) 
+           (list #x66 #x0F #x1F (mod-r/m 0 dst)))
+          ((and (r/m-p dst) (= (destination-size dst) 4))
+           (list #x0F #x1F (mod-r/m 0 dst)))
+          (t
+           (error "unsupported")))))
+
 (defun assemble-instruction (opcode operands)
   (ecase opcode
+    (:nop (@nop operands))
+    (:hlt (@hlt operands))
     (:mov (@mov operands))
     (:ret (@ret operands))
     (:push (@push operands))
@@ -443,6 +458,15 @@
           list2
           (subseq list pos)))
 
+;; XXX: name
+(defun expand-progn (mnemonics)
+  (loop FOR n IN mnemonics
+        FOR m = (if (and (consp n) (keywordp (car n))) n (eval n))
+    APPEND
+    (if (and (consp m) (eq (car m) :progn)) ;; TODO: recursively
+        (cdr m)
+      (list m))))
+
 (defun assemble (mnemonics)
   (macrolet ((label-addr (name)  `(gethash ,name label-addr))
              (pc () `(length list))
@@ -454,7 +478,7 @@
 
   (loop WITH label-addr = (make-hash-table)
         WITH unresolves = '()
-        FOR mnemonic IN (mapcar #'to-list mnemonics)
+        FOR mnemonic IN (mapcar #'to-list (expand-progn mnemonics))
     APPEND
     (cond ((mnemonic-label-p mnemonic)
            (setf (label-addr (first mnemonic)) (pc))
