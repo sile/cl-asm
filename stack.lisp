@@ -9,6 +9,7 @@
      ,@mnemonics
      ,@out@))
 
+
  ;; ready/destroy data-stack
  (defun ready ()
    '(:progn (:push %rax)
@@ -49,35 +50,65 @@
    `(:progn (:mov ,dst (:refd %rcx))
             (:sub %rcx 4)))
  
- (defun @swap () ;; todo: defop
-   `(:progn (:mov %ebx (:refd %rcx 0))
-            (:mov %edx (:refd %rcx 4))
-            (:mov (:refd %rcx 0) %edx)
-            (:mov (:refd %rcx 4) %ebx)))
+ (defun @swap2 (a b)
+   `(:progn (:mov %ebx (:refd %rcx ,(* a -4)))
+            (:mov %edx (:refd %rcx ,(* b -4)))
+            (:mov (:refd %rcx ,(* a -4)) %edx)
+            (:mov (:refd %rcx ,(* b -4)) %ebx)))
+
+ (defun @swap ()
+   `(@swap2 0 1))
  
  (defun @dup ()
    `(:progn (:mov %ebx (:refd %rcx))
-            (:add %rcx 4)
-            (:mov (:refd %rcx) %ebx)))
+            (@push %ebx)))
  
  (defun @drop ()
    `(:progn (:sub %rcx 4)))
 
  (defun @over ()
-   `(:progn (:mov %ebx (:refd %rcx 4))
-            
+   `(:progn (:mov %ebx (:refd %rcx -4))
+            (@push %ebx)))
 
+ (defun @rot ()
+   `(:progn (@swap2 2 0)
+            (@swap2 1 2)))
+
+ (defun @add ()
+   `(:progn (@pop %ebx)
+            (@pop %eax)
+            (:add %eax %ebx)
+            (@push %eax)))
+
+ (defun @sub ()
+   `(:progn (@pop %ebx) ; TODO: pop2
+            (@pop %eax)
+            (:sub %eax %ebx)
+            (@push %eax)))
+
+ (defun @eql ()
+   `(:progn (@pop %eax)
+            (@pop %ebx)
+            (:sub %eax %ebx)
+            (@push %eax)))
+ 
+ (defun @less ()
+   `(:progn (@pop %eax)
+            (@pop %ebx)
+            (:sub %eax %ebx)
+            ;; TODO: minus判定
+            (@push %eax)))
  )
 
 (cl-asm:execute
  (body
-  $ready$
-  (dpush %edi)
-  (ddup)
-  (dswap)
-  (dpop %eax)
-  (dpop %eax)
-  $destroy$
+  (ready)
+  (@push 10)
+  (@push %edi)
+  (@sub)
+  (@pop %eax)
+  (:setna %al)
+  (destroy)
   )
  (function int int) 30)
 

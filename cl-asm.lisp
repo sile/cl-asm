@@ -309,6 +309,12 @@
       (:imm8  (list (jcc-cond-op opcode dst) (int-to-bytes 1 (imm-value dst))))
       (:imm32 (list (jcc-cond-op opcode dst) (int-to-bytes 4 (imm-value dst)))))))
 
+(def-ins @setcc (opcode dst)
+  (unless (and (r/m-p dst) (= (destination-size dst) 1))
+    (error "unsupported"))
+  (let ((cnd (intern (concatenate 'string "J" (subseq (symbol-name opcode) 3)) :keyword)))
+    (list #x0F (+ (jcc-cond-op cnd (make-imm :size 1)) #x20) (mod-r/m 0 dst))))
+
 (defun to-list (x) (if (listp x) x (list x)))
 
 #+SBCL
@@ -426,6 +432,11 @@
     ((:ja :jae :jb :jbe :jc :je :jecxz :jg :jge :jl :jle :jna :jnae :jnb :jnbe :jnc
       :jne :jng :jnge :jnl :jnle :jno :jnp :jns :jnz :jo :jp :jpe :jpo :jrcxz :js
       :jz) (@jcc (cons opcode operands)))
+    ((:seta :setae :setb :setbe :setc :sete :setecxz :setg :setge :setl :setle 
+      :setna :setnae :setnb :setnbe :setnc
+      :setne :setng :setnge :setnl :setnle :setno :setnp :setns :setnz 
+      :seto :setp :setpe :setpo :setrcxz :sets
+      :setz) (@setcc (cons opcode operands)))
     ))
 
 (defparameter *op-label-defs*
