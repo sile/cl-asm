@@ -150,3 +150,24 @@
   (@pop %eax)
   )
  (function int int) 35))
+
+
+(cl-asm:execute
+ (body
+  (@push %edi)
+  (@call &fib-beg)
+  (@jump &finish)
+
+  &fib-beg
+  (@dup) (@int 2) (@less) (@jump-if &fib-end)
+  (@dup) (@int 2) (@sub) (@call &fib-beg)
+  (@swap) (@int 1) (@sub) (@call &fib-beg)
+  (@add)
+  &fib-end
+  (@return)
+
+  &finish
+
+  (@pop %eax))
+
+ (function int int) 10)

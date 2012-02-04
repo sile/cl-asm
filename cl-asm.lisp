@@ -251,15 +251,6 @@
   (def-ins @inc (dst) (op 0 dst))
   (def-ins @dec (dst) (op 1 dst)))
 
-(def-ins @dec (dst)
-  (when (not (r/m-p dst))
-    (error "unsupported"))
-  (ecase (destination-size dst)
-    (1 (list #xFE (mod-r/m 1 dst)))
-    (2 (list #x66 #xFF (mod-r/m 1 dst)))
-    (4 (list #xFF (mod-r/m 1 dst)))
-    (8 (list +REX.W+ #xFF (mod-r/m 1 dst)))))
-
 (defun jcc-cond-op (cnd imm)
   (multiple-value-bind (code imm32-compatible)
                        (ecase cnd
