@@ -124,10 +124,8 @@
 
 (cl-asm:execute
  (body
-  (ready)
   (@int 10)
   (@pop %eax)
-  (destroy)
   )
  (function int int) 30)
 
