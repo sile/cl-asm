@@ -49,6 +49,11 @@
  (defun @pop (dst)  ;
    `(:progn (:mov ,dst (:refd %rcx))
             (:sub %rcx 4)))
+
+ (defun @pop2 (dst1 dst2)
+   `(:progn (:mov ,dst1 (:refd %rcx 0))
+            (:mov ,dst2 (:refd %rcx -4))
+            (:sub %rcx 8)))
  
  (defun @swap2 (a b)
    `(:progn (:mov %ebx (:refd %rcx ,(* a -4)))
@@ -75,26 +80,22 @@
             (@swap2 1 2)))
 
  (defun @add ()
-   `(:progn (@pop %ebx)
-            (@pop %eax)
+   `(:progn (@pop2 %ebx %eax)
             (:add %eax %ebx)
             (@push %eax)))
 
  (defun @sub ()
-   `(:progn (@pop %ebx) ; TODO: pop2
-            (@pop %eax)
+   `(:progn (@pop2 %ebx %eax)
             (:sub %eax %ebx)
             (@push %eax)))
 
  (defun @eql ()
-   `(:progn (@pop %eax)
-            (@pop %ebx)
+   `(:progn (@pop2 %ebx %eax)
             (:sub %eax %ebx)
             (@push %eax)))
  
  (defun @less ()
-   `(:progn (@pop %ebx)
-            (@pop %eax)
+   `(:progn (@pop2 %ebx %eax)
             (:cmp %eax %ebx)
             (:mov %eax 0)
             (:setl %al)
@@ -148,4 +149,4 @@
   (@pop %eax)
   (destroy)
   )
- (function int int) 10)
+ (function int int) 35)
