@@ -463,8 +463,8 @@
   (loop FOR n IN mnemonics
         FOR m = (if (and (consp n) (keywordp (car n))) n (eval n))
     APPEND
-    (if (and (consp m) (eq (car m) :progn)) ;; TODO: recursively
-        (cdr m)
+    (if (and (consp m) (eq (car m) :progn))
+        (expand-progn (cdr m))
       (list m))))
 
 (defun assemble (mnemonics)
