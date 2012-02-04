@@ -471,12 +471,17 @@
 
 ;; XXX: name
 (defun expand-progn (mnemonics)
-  (loop FOR n IN mnemonics
-        FOR m = (if (and (consp n) (keywordp (car n))) n (eval n))
+  (loop FOR m IN mnemonics
     APPEND
-    (if (and (consp m) (eq (car m) :progn))
-        (expand-progn (cdr m))
-      (list m))))
+    (progn
+      (loop WHILE (not (or (and (consp m) (keywordp (car m)))
+                           (keywordp m)
+                           (operand-label-p m)))
+            DO (setf m (eval m)))
+                           
+      (if (and (consp m) (eq (car m) :progn))
+          (expand-progn (cdr m))
+        (list m)))))
 
 (defun assemble (mnemonics)
   (macrolet ((label-addr (name)  `(gethash ,name label-addr))

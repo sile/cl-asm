@@ -93,39 +93,59 @@
             (@push %eax)))
  
  (defun @less ()
-   `(:progn (@pop %eax)
-            (@pop %ebx)
-            (:sub %eax %ebx)
-            ;; TODO: minus判定
+   `(:progn (@pop %ebx)
+            (@pop %eax)
+            (:cmp %eax %ebx)
+            (:mov %eax 0)
+            (:setl %al)
             (@push %eax)))
+
+ (defun @jump-if (pos)
+   `(:progn (@pop %eax)
+            (:cmp %eax 0)
+            (:jne ,pos)))
+
+ (defun @jump (pos)
+   `(:jmp ,pos))
+
+ (defun @call (pos)
+   `(:call ,pos))
+
+ (defun @int (n)
+   `(@push ,n))
+
+ (defun @return ()
+   :ret)
  )
 
 (cl-asm:execute
  (body
   (ready)
-  (@push 10)
-  (@push %edi)
-  (@sub)
+  (@int 10)
   (@pop %eax)
-  (:setna %al)
   (destroy)
   )
  (function int int) 30)
 
-;; push
-(:mov (:refd %rdi) %eax)
-(:add %rdi 4)
+;; fib
+(cl-asm:execute
+ (body
+  (ready)
+  (@push %edi)
+  (@call '&fib-beg)
+  (@jump '&finish)
 
-;; pop
-(:sub %rdi 4)
-(:mov %eax (:refd %rdi))
+  &fib-beg
+  (@dup) (@int 2) (@less) (@jump-if '&fib-end)
+  (@dup) (@int 2) (@sub) (@call '&fib-beg)
+  (@swap) (@int 1) (@sub) (@call '&fib-beg)
+  (@add)
+  &fib-end
+  (@return)
 
-(defparameter *regs*
-  '((%al 1 0) (%ax 2 0) (%eax 4 0) (%rax 8 0)
-    (%cl 1 1) (%cx 2 1) (%ecx 4 1) (%rcx 8 1)
-    (%dl 1 2) (%dx 2 2) (%edx 4 2) (%rdx 8 2)
-    (%bl 1 3) (%bx 2 3) (%ebx 4 3) (%rbx 8 3)
-    (%ah 1 4) (%sp 2 4) (%esp 4 4) (%rsp 8 4)
-    (%ch 1 5) (%bp 2 5) (%ebp 4 5) (%rbp 8 5)
-    (%dh 1 6) (%si 2 6) (%esi 4 6) (%rsi 8 6)
-    (%bh 1 7) (%di 2 7) (%edi 4 7) (%rdi 8 7)))
+  &finish
+
+  (@pop %eax)
+  (destroy)
+  )
+ (function int int) 10)
