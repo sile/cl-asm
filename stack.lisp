@@ -1,123 +1,126 @@
-(progn
- (defparameter save-stack@ '((:push %rbp) (:mov %rbp %rsp) (:push %rdi) (:push %rsi) (:push %rbx)))
- (defparameter restore-stack@ '((:pop %rbx) (:pop %rsi) (:pop %rdi) (:pop %rbp)))
- (defparameter in@ save-stack@)
- (defparameter out@ `(,@restore-stack@ :ret))
+(defun save-registers ()
+  '(:progn
+    (:push %rbp) (:mov %rbp %rsp) (:push %rdi) (:push %rsi) (:push %rbx)))
 
- (defmacro body (&rest mnemonics)
-  `'(,@in@
-     ,@mnemonics
-     ,@out@))
+(defun restore-registers ()
+  '(:progn
+    (:pop %rbx) (:pop %rsi) (:pop %rdi) (:pop %rbp)))
 
-
- ;; ready/destroy data-stack
- (defun ready ()
+(defun ready-data-stack ()
    '(:progn (:push %rax)
             (:push %rdi)
-            (:mov %edi 1024)
+            (:mov %edi 102400)
             (:mov %rax (:extern "malloc"))
             (:call %rax)
             (:mov %rcx %rax)
             (:pop %rdi)
             (:pop %rax)))
 
- (defun destroy ()
-   '(:progn (:push %rax)
-            (:push %rdi)
-            (:mov %rdi %rcx)
-            (:mov %rax (:extern "free"))
-            (:call %rax)
-            (:pop %rdi)
-            (:pop %rax)))
+(defun destroy-data-stack ()
+  '(:progn (:push %rax)
+           (:push %rdi)
+           (:mov %rdi %rcx)
+           (:mov %rax (:extern "free"))
+           (:call %rax)
+           (:pop %rdi)
+           (:pop %rax)))
 
+(defmacro body (&rest mnemonics)
+  `'(,(save-registers)
+     ,(ready-data-stack)
+     ,@mnemonics
+     ,(destroy-data-stack)
+     ,(restore-registers)
+     :ret))
 
- ;; registers
- (defparameter %edi '%edi)
- (defparameter %eax '%eax)
- (defparameter %ebx '%ebx)
- (defparameter %edx '%edx)
- (defparameter %ecx '%ecx)
- 
+(defmacro defop (name args &body body)
+  `(defmacro ,name ,args
+     (list 'quote (locally ,@body))))
+
  ;; ecx: data-stack
- ;; edx, ebx: temporary
+ ;; eax, ebx: temporary
 
- ;; stack-operation
- (defun @push (dst) ;
-   `(:progn (:add %rcx 4)
-            (:mov (:refd %rcx) ,dst)))
- 
- (defun @pop (dst)  ;
-   `(:progn (:mov ,dst (:refd %rcx))
-            (:sub %rcx 4)))
+(defop @ds-get (dst index) `(:mov ,dst (:refd %rcx ,(* index -4))))
+(defop @ds-set (index src) `(:mov (:refd %rcx ,(* index -4)) ,src))
+(defop @ds-inc (&optional (n 1)) `(:add %rcx ,(* 4 n)))
+(defop @ds-dec (&optional (n 1)) `(:sub %rcx ,(* 4 n)))
+  
 
- (defun @pop2 (dst1 dst2)
-   `(:progn (:mov ,dst1 (:refd %rcx 0))
-            (:mov ,dst2 (:refd %rcx -4))
-            (:sub %rcx 8)))
- 
- (defun @swap2 (a b)
-   `(:progn (:mov %ebx (:refd %rcx ,(* a -4)))
-            (:mov %edx (:refd %rcx ,(* b -4)))
-            (:mov (:refd %rcx ,(* a -4)) %edx)
-            (:mov (:refd %rcx ,(* b -4)) %ebx)))
+(defop @push (src)
+  `(:progn (@ds-inc)
+           (@ds-set 0 ,src)))
 
- (defun @swap ()
-   `(@swap2 0 1))
- 
- (defun @dup ()
-   `(:progn (:mov %ebx (:refd %rcx))
-            (@push %ebx)))
- 
- (defun @drop ()
-   `(:progn (:sub %rcx 4)))
+(defop @pop (dst)
+  `(:progn (@ds-get ,dst 0)
+           (@ds-dec)))
 
- (defun @over ()
-   `(:progn (:mov %ebx (:refd %rcx -4))
-            (@push %ebx)))
+(defop @pop2 (dst1 dst2)
+  `(:progn (@ds-get ,dst1 0)
+           (@ds-get ,dst2 1)
+           (@ds-dec 2)))
 
- (defun @rot ()
-   `(:progn (@swap2 2 0)
-            (@swap2 1 2)))
+(defop @swap-impl (index1 index2)
+  `(:progn (@ds-get %eax ,index1)
+           (@ds-get %ebx ,index2)
+           (@ds-set ,index1 %ebx)
+           (@ds-set ,index2 %eax)))
 
- (defun @add ()
-   `(:progn (@pop2 %ebx %eax)
-            (:add %eax %ebx)
-            (@push %eax)))
+(defop @swap ()
+  '(@swap-impl 0 1))
 
- (defun @sub ()
-   `(:progn (@pop2 %ebx %eax)
+(defop @dup ()
+  `(:progn (@ds-get %eax 0)
+           (@push %eax)))
+
+(defop @drop ()
+  '(@ds-dec))
+
+(defop @over ()
+  `(:progn (@ds-get %eax 1)
+           (@push %eax)))
+
+(defop @rot
+  `(:progn (@swap-impl 2 0)
+           (@swap-impl 1 2)))
+
+(defop @add ()
+  `(:progn (@pop2 %ebx %eax)
+           (:add %eax %ebx)
+           (@push %eax)))
+
+(defop @sub ()
+  `(:progn (@pop2 %ebx %eax)
             (:sub %eax %ebx)
             (@push %eax)))
 
- (defun @eql ()
-   `(:progn (@pop2 %ebx %eax)
-            (:sub %eax %ebx)
-            (@push %eax)))
+(defop @eql ()
+  `(:progn (@pop2 %ebx %eax)
+           (:sub %eax %ebx)
+           (@push %eax)))
  
- (defun @less ()
-   `(:progn (@pop2 %ebx %eax)
-            (:cmp %eax %ebx)
-            (:mov %eax 0)
-            (:setl %al)
-            (@push %eax)))
+(defop @less ()
+  `(:progn (@pop2 %ebx %eax)
+           (:cmp %eax %ebx)
+           (:mov %eax 0)
+           (:setl %al)
+           (@push %eax)))
 
- (defun @jump-if (pos)
-   `(:progn (@pop %eax)
-            (:cmp %eax 0)
-            (:jne ,pos)))
+(defop @jump-if (pos)
+  `(:progn (@pop %eax)
+           (:cmp %eax 0)
+           (:jne ,pos)))
 
- (defun @jump (pos)
-   `(:jmp ,pos))
+(defop @jump (pos)
+  `(:jmp ,pos))
 
- (defun @call (pos)
-   `(:call ,pos))
+(defop @call (pos)
+  `(:call ,pos))
 
- (defun @int (n)
-   `(@push ,n))
+(defop @int (n)
+  `(@push ,n))
 
- (defun @return ()
-   :ret)
- )
+(defop @return ()
+  :ret)
 
 (cl-asm:execute
  (body
@@ -129,17 +132,17 @@
  (function int int) 30)
 
 ;; fib
-(cl-asm:execute
+(time
+ (cl-asm:execute
  (body
-  (ready)
   (@push %edi)
-  (@call '&fib-beg)
-  (@jump '&finish)
+  (@call &fib-beg)
+  (@jump &finish)
 
   &fib-beg
-  (@dup) (@int 2) (@less) (@jump-if '&fib-end)
-  (@dup) (@int 2) (@sub) (@call '&fib-beg)
-  (@swap) (@int 1) (@sub) (@call '&fib-beg)
+  (@dup) (@int 2) (@less) (@jump-if &fib-end)
+  (@dup) (@int 2) (@sub) (@call &fib-beg)
+  (@swap) (@int 1) (@sub) (@call &fib-beg)
   (@add)
   &fib-end
   (@return)
@@ -147,6 +150,5 @@
   &finish
 
   (@pop %eax)
-  (destroy)
   )
- (function int int) 35)
+ (function int int) 35))
