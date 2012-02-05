@@ -79,7 +79,7 @@
   `(:progn (@ds-get %eax 1)
            (@push %eax)))
 
-(defop @rot
+(defop @rot ()
   `(:progn (@swap-impl 2 0)
            (@swap-impl 1 2)))
 
