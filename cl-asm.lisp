@@ -85,6 +85,16 @@
 (defun make-mod-r/m (mod reg/opcode r/m)
   (+ (ash mod 6) (ash reg/opcode 3) r/m))
 
+(defun sib.none (reg-code)
+  (ecase reg-code
+    (#b000 #x20)
+    (#b001 #x21)
+    (#b010 #x22)
+    (#b011 #x23)
+    (#b100 #x24)
+    (#b110 #x25)
+    (#b111 #x26)))
+
 (defun make-x/m-mod-r/m (op/reg-code mem)
   (etypecase mem
     (mem-direct 
@@ -94,12 +104,13 @@
      (let ((mem-off (mem-indirect-offset mem))
            (mem-reg-code (reg-code (mem-indirect-reg mem))))
      (if (zerop mem-off)
-         (make-mod-r/m #b00 op/reg-code mem-reg-code)
+         (list (make-mod-r/m #b00 op/reg-code mem-reg-code) (sib.none mem-reg-code))
        (multiple-value-bind (mod addr-size)
                             (ecase (imm-byte-width mem-off)
                               (1     (values #b01 1))
                               ((2 4) (values #b10 4)))
-         (list (make-mod-r/m mod op/reg-code mem-reg-code) (int-to-bytes addr-size mem-off))))))))
+         (list (make-mod-r/m mod op/reg-code mem-reg-code) 
+               (sib.none mem-reg-code) (int-to-bytes addr-size mem-off))))))))
 
 (defun make-r/m-mod-r/m (reg mem)
   (make-x/m-mod-r/m (reg-code reg) mem))
