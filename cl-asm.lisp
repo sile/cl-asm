@@ -471,6 +471,9 @@
           list2
           (subseq list pos)))
 
+(defun byte-p (n)
+  (typep n '(unsigned-byte 8)))
+
 ;; XXX: name
 (defun expand-progn (mnemonics)
   (loop FOR m IN mnemonics
@@ -478,6 +481,7 @@
     (progn
       (loop WHILE (not (or (and (consp m) (keywordp (car m)))
                            (keywordp m)
+                           (byte-p m)
                            (operand-label-p m)))
             DO (setf m (eval m)))
                            
@@ -498,7 +502,9 @@
         WITH unresolves = '()
         FOR mnemonic IN (mapcar #'to-list (expand-progn mnemonics))
     APPEND
-    (cond ((mnemonic-label-p mnemonic)
+    (cond ((byte-p (car mnemonic))
+           mnemonic)
+          ((mnemonic-label-p mnemonic)
            (setf (label-addr (first mnemonic)) (pc))
            '())
           ((mnemonic-unresolve-p mnemonic)
