@@ -171,6 +171,10 @@
 (def-ins @ret ()
   #xC3)
 
+(def-ins @int (interrupt)
+  (list #xCD (int-to-bytes 1 (imm-value interrupt)))
+  )
+
 (flet ((operand-type-of (o)
          (cond ((and (mem-p o) (= 2 (mem-size o))) :mem16)
                ((and (mem-p o) (= 8 (mem-size o))) :mem64)
@@ -418,6 +422,7 @@
 
 (defun assemble-instruction (opcode operands)
   (ecase opcode
+    (:int (@int operands))
     (:nop (@nop operands))
     (:hlt (@hlt operands))
     (:mov (@mov operands))
